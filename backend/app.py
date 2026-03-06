@@ -7,8 +7,7 @@ import requests
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import CountVectorizer
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import sqlite3
 import re
 import io
 from pypdf import PdfReader
@@ -24,7 +23,7 @@ CORS(app)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or os.getenv("github_token")
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = "candidates.db"
 
 # Configure Groq
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -42,11 +41,11 @@ response_cache = {}
 # --- DATABASE SETUP ---
 def init_db():
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = sqlite3.connect(DATABASE_URL)
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS candidates (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
                 headline TEXT,
                 location TEXT,
@@ -57,20 +56,27 @@ def init_db():
                 summary TEXT,
                 matched_skills TEXT,
                 linkedin_url TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         conn.commit()
+        
         # Add new columns if they don't exist
+        # SQLite ALTER TABLE ADD COLUMN does not support IF NOT EXISTS directly.
+        # We need to query table info first.
+        c.execute("PRAGMA table_info(candidates)")
+        columns = [col[1] for col in c.fetchall()]
+        
         for col in ['picture', 'summary', 'missing_skills', 'matched_skills', 'linkedin_url']:
-            try:
-                c.execute(f"ALTER TABLE candidates ADD COLUMN {col} TEXT")
-                conn.commit()
-            except Exception:
-                conn.rollback()
+            if col not in columns:
+                try:
+                    c.execute(f"ALTER TABLE candidates ADD COLUMN {col} TEXT")
+                    conn.commit()
+                except Exception as e:
+                    print(f"Column add error for {col}: {e}")
                 
         conn.close()
-        print("Database initialized.")
+        print("Database initialized locally with SQLite.")
     except Exception as e:
         print(f"Database Error: {e}")
 
@@ -417,7 +423,7 @@ def analyze_seeker():
 
 @app.route("/get-job-roles", methods=["GET"])
 def get_job_roles():
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = sqlite3.connect(DATABASE_URL)
     c = conn.cursor()
     c.execute("SELECT DISTINCT job_role FROM candidates WHERE job_role IS NOT NULL AND job_role != ''")
     rows = c.fetchall()
@@ -432,8 +438,10 @@ def analyze_recruiter():
     job_role = data.get("job_role", "")
     job_description = data.get("job_description", "")
     
-    conn = psycopg2.connect(DATABASE_URL)
-    c = conn.cursor(cursor_factory=RealDictCursor)
+    # Enable dict factory for sqlite3
+    conn = sqlite3.connect(DATABASE_URL)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
     
     # Deduplicate incoming candidates by name to prevent cart duplicates
     unique_candidates = []
@@ -447,12 +455,9 @@ def analyze_recruiter():
     # Process new candidates
     for cand in unique_candidates:
         name = cand.get("name", "Unknown")
+        # Add an aggressive normalization for deduplication
+        normalized_name = name.lower().strip()
         
-        # Check if candidate already exists in DB for this role
-        c.execute("SELECT id FROM candidates WHERE name = %s AND job_role = %s", (name, job_role))
-        if c.fetchone():
-            continue # Skip inserting if they already exist
-            
         skills = cand.get("skills", [])
         headline = cand.get("headline", "")
         location = cand.get("location", "Unknown")
@@ -467,43 +472,62 @@ def analyze_recruiter():
         
         summary = f"{name} is an applicant for {job_role} with key skills in {', '.join(matched_skills[:3]) if matched_skills else 'their respective field'}."
         
-        # Insert into DB (Postgres uses %s for parameters)
-        c.execute('''
-            INSERT INTO candidates (name, headline, location, skills, ats_score, job_role, picture, summary, missing_skills, matched_skills, linkedin_url)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (name, headline, location, json.dumps(skills), ats_score, job_role, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url))
+        # Check if candidate already exists in DB for this role using normalized matching
+        c.execute("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = ? AND job_role = ?", (normalized_name, job_role))
+        existing = c.fetchone()
+        
+        if existing:
+            # Update their existing record
+            c.execute('''
+                UPDATE candidates 
+                SET headline = ?, location = ?, skills = ?, ats_score = ?, picture = ?, summary = ?, missing_skills = ?, matched_skills = ?, linkedin_url = ?
+                WHERE id = ?
+            ''', (headline, location, json.dumps(skills), ats_score, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url, existing['id']))
+        else:
+            # Insert a new record
+            c.execute('''
+                INSERT INTO candidates (name, headline, location, skills, ats_score, job_role, picture, summary, missing_skills, matched_skills, linkedin_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name, headline, location, json.dumps(skills), ats_score, job_role, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url))
     
     conn.commit()
     
-    # Fetch Top candidates for this role (Global Ranking) with Deduplication
+    # Fetch ALL candidates for this role 
     c.execute('''
         SELECT name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url
-        FROM (
-            SELECT DISTINCT ON (name) name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url 
-            FROM candidates 
-            WHERE job_role = %s 
-            ORDER BY name, ats_score DESC
-        ) as unique_candidates
+        FROM candidates 
+        WHERE job_role = ?
         ORDER BY ats_score DESC
     ''', (job_role,))
     
     rows = c.fetchall()
     conn.close()
     
+    # Aggressively deduplicate in Python before sending to frontend
     ranked_candidates = []
+    seen_final_names = set()
+    
     for r in rows:
-        # Postgres returns RealDictRow if using RealDictCursor, which makes it easy to access by column name
+        r_dict = dict(r)
+        name = r_dict.get("name", "")
+        normalized = name.lower().strip()
+        
+        if normalized in seen_final_names or not normalized:
+            continue
+            
+        seen_final_names.add(normalized)
+        
         ranked_candidates.append({
-            "name": r["name"],
-            "headline": r["headline"],
-            "location": r["location"],
-            "skills": json.loads(r["skills"]) if isinstance(r["skills"], str) else r["skills"],
-            "ats_score": r["ats_score"],
-            "picture": r.get("picture", ""),
-            "summary": r.get("summary", ""),
-            "missing_skills": json.loads(r["missing_skills"]) if isinstance(r.get("missing_skills"), str) else r.get("missing_skills", []) or [],
-            "matched_skills": json.loads(r["matched_skills"]) if isinstance(r.get("matched_skills"), str) else r.get("matched_skills", []) or [],
-            "linkedin_url": r.get("linkedin_url", "")
+            "name": r_dict.get("name", ""),
+            "headline": r_dict.get("headline", ""),
+            "location": r_dict.get("location", ""),
+            "skills": json.loads(r_dict.get("skills", "[]")) if isinstance(r_dict.get("skills"), str) else r_dict.get("skills", []),
+            "ats_score": r_dict.get("ats_score", 0),
+            "picture": r_dict.get("picture", ""),
+            "summary": r_dict.get("summary", ""),
+            "missing_skills": json.loads(r_dict.get("missing_skills", "[]")) if isinstance(r_dict.get("missing_skills"), str) else r_dict.get("missing_skills", []) or [],
+            "matched_skills": json.loads(r_dict.get("matched_skills", "[]")) if isinstance(r_dict.get("matched_skills"), str) else r_dict.get("matched_skills", []) or [],
+            "linkedin_url": r_dict.get("linkedin_url", "")
         })
     
     return jsonify({
