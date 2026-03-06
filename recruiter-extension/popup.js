@@ -199,6 +199,7 @@ document.getElementById("analyze").onclick = async () => {
           location: getLocation(),
           skills: getSkills(),
           picture: getProfilePicture(),
+          linkedin_url: window.location.href,
         };
 
         if (!profile.name && !profile.headline) {

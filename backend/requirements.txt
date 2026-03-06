@@ -6,3 +6,4 @@ requests
 pypdf
 groq
 python-dotenv
+psycopg2-binary
