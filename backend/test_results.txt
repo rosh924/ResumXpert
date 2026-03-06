@@ -1,0 +1,19 @@
+Running Tests...
+
+Test Case 1:
+JD: We are looking for a Full Stack Developer with experience in Python, React, and AWS.
+User Skills: []
+Extracted Missing Skills: ['python', 'react', 'aws', 'full stack']
+------------------------------
+Test Case 2:
+JD: seeking a data scientist who knows machine learning and pandas.
+User Skills: ['python']
+Extracted Missing Skills: ['machine learning', 'pandas']
+------------------------------
+Test Case 3:
+JD: java developer needed.
+User Skills: ['c++']
+Extracted Missing Skills: ['java']
+------------------------------
+
+Done.

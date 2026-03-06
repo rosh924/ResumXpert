@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            width: 240px;
+            height: 125px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #FFFDF1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .container {
+            text-align: center;
+            width: 100%;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+
+        button#analyze {
+            background: #FF9644;
+            /* Solid primary orange */
+            border: none;
+            border-radius: 6px;
+            /* Simpler radius */
+            padding: 10px 20px;
+            color: #FFFDF1;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            outline: none;
+            width: 100%;
+            text-transform: none;
+            /* Removed uppercase */
+        }
+
+        button#analyze:hover {
+            background: #e5873d;
+            /* Darker orange on hover */
+        }
+
+        button#analyze:active {
+            background: #cc7836;
+        }
+
+        .title {
+            color: #562F00;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .description {
+            color: #562F00;
+            opacity: 0.8;
+            font-size: 11px;
+            margin-bottom: 12px;
+            font-weight: 400;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="title">ResumXpert</div>
+        <div class="description">AI-Powered Resume Optimization & Analysis</div>
+        <button id="analyze">Analyze Profile</button>
+    </div>
+    <script src="popup.js"></script>
+</body>
+
+</html>

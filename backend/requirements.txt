@@ -1,0 +1,8 @@
+flask
+flask-cors
+sentence-transformers
+scikit-learn
+requests
+pypdf
+groq
+python-dotenv

@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+
+:root {
+  /* Cream background */
+  --background: hsl(51 100% 97%);
+  /* Dark brown foreground text */
+  --foreground: hsl(33 100% 17%);
+  --card: hsl(51 100% 97%);
+  --card-foreground: hsl(33 100% 17%);
+  --popover: hsl(51 100% 97%);
+  --popover-foreground: hsl(33 100% 17%);
+  /* Bright orange primary */
+  --primary: hsl(26 100% 63%);
+  /* Cream text on primary buttons */
+  --primary-foreground: hsl(51 100% 97%);
+  /* Light peach secondary */
+  --secondary: hsl(31 100% 80%);
+  --secondary-foreground: hsl(33 100% 17%);
+  /* Same as secondary for muted */
+  --muted: hsl(31 100% 80%);
+  --muted-foreground: hsl(33 100% 25%);
+  --accent: hsl(31 100% 80%);
+  --accent-foreground: hsl(33 100% 17%);
+  /* Red */
+  --destructive: hsl(0 84.2% 60.2%);
+  --destructive-foreground: hsl(51 100% 97%);
+  /* Lighter brown/peach border */
+  --border: hsl(31 100% 80%);
+  --input: hsl(31 100% 80%);
+  /* primary orange ring */
+  --ring: hsl(26 100% 63%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  body {
+    /* Hardcode the cream and brown for the body as well */
+    @apply bg-[#FFFDF1] text-[#562F00] antialiased;
+    /* Warm dynamic gradients */
+    background-image:
+      radial-gradient(circle at 50% 0%, rgba(255, 150, 68, 0.15), transparent 50%),
+      radial-gradient(circle at 0% 50%, rgba(255, 206, 153, 0.3), transparent 50%),
+      radial-gradient(circle at 100% 50%, rgba(255, 150, 68, 0.1), transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(86, 47, 0, 0.15);
+  /* #562F00 inverted opacity */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(86, 47, 0, 0.3);
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  @apply bg-[#FFFDF1]/70 backdrop-blur-xl border border-[#FFCE99] shadow-xl;
+}
+
+.glass-card {
+  @apply bg-[#FFFDF1]/60 backdrop-blur-md border border-[#FFCE99] hover:bg-[#FFFDF1]/80 hover:border-[#FF9644] transition-all duration-300;
+}
+
+/* Animations */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

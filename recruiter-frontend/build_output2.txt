@@ -1,0 +1,4 @@
+src/app/App.tsx(2,27): error TS2307: Cannot find module './components/ModeSelection' or its corresponding type declarations.
+src/app/App.tsx(3,29): error TS2307: Cannot find module './components/SeekerDashboard' or its corresponding type declarations.
+src/app/components/ui/badge.tsx(5,20): error TS2307: Cannot find module './utils' or its corresponding type declarations.
+src/app/components/ui/button.tsx(5,20): error TS2307: Cannot find module './utils' or its corresponding type declarations.

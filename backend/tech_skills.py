@@ -1,0 +1,23 @@
+TECH_SKILLS = {
+    "python", "java", "c++", "c#", "javascript", "typescript", "ruby", "php", "swift", "kotlin", "go", "rust",
+    "html", "css", "sql", "nosql", "mysql", "postgresql", "mongodb", "redis", "sqlite",
+    "react", "angular", "vue", "next.js", "nuxt.js", "svelte", "jquery", "bootstrap", "tailwind css",
+    "node.js", "express", "django", "flask", "spring boot", "ruby on rails", "asp.net", "laravel",
+    "aws", "azure", "google cloud", "docker", "kubernetes", "jenkins", "terraform", "ansible",
+    "git", "github", "gitlab", "bitbucket",
+    "machine learning", "deep learning", "artificial intelligence", "data science", "data analysis",
+    "pandas", "numpy", "scikit-learn", "tensorflow", "pytorch", "keras",
+    "full stack", "frontend", "backend", "devops", "cloud computing", "cybersecurity", "blockchain",
+    "agile", "scrum", "kanban", "jira", "confluence",
+    "linux", "unix", "windows", "macos", "android", "ios",
+    "rest api", "graphql", "soap", "json", "xml",
+    "microservices", "serverless", "distributed systems",
+    "object-oriented programming", "functional programming",
+    "test-driven development", "continuous integration", "continuous deployment",
+    "algorithms", "data structures", "system design",
+    "big data", "hadoop", "spark", "kafka", "elasticsearch",
+    "tableau", "power bi", "looker",
+    "figma", "sketch", "adobe xd", "photoshop", "illustrator",
+    "excel", "word", "powerpoint", "outlook",
+    "communication", "teamwork", "problem solving", "critical thinking", "leadership", "time management"
+}
