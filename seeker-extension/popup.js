@@ -193,6 +193,17 @@ document.getElementById("analyze").onclick = async () => {
         };
 
         const getProfilePicture = () => {
+          const selectors = [
+            "img.pv-top-card-profile-picture__image--show",
+            "img.pv-top-card-profile-picture__image",
+            "img.profile-photo-edit__preview",
+            "img.ghost-person",
+            ".pv-top-card__photo img",
+            ".presence-entity__image",
+            ".global-nav__me img",
+            "img.global-nav__me-photo",
+            "img[alt^='Profile photo of']",
+            "img[src*='profile-displayphoto-shrink']"
           const headerSelectors = [
             ".ph5 .pv-top-card-profile-picture__image", 
             ".ph5 img.profile-photo-edit__preview",
@@ -210,6 +221,7 @@ document.getElementById("analyze").onclick = async () => {
             }
           }
 
+          return null;
           return null; // Don't fall back to random navigation avatars
         };
 
