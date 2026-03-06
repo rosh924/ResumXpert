@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+// @ts-ignore
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { useRef } from "react";

@@ -165,15 +165,17 @@ document.getElementById("analyze").onclick = async () => {
         };
 
         const getProfilePicture = () => {
-          // LinkedIn profile pictures are usually inside an img tag within a specific div structure
-          // 1. The main profile picture container on the user's own profile page
-          // 2. The picture container on the detailed skills page or other sub-pages
           const selectors = [
+            "img.pv-top-card-profile-picture__image--show",
             "img.pv-top-card-profile-picture__image",
             "img.profile-photo-edit__preview",
             "img.ghost-person",
             ".pv-top-card__photo img",
-            ".presence-entity__image"
+            ".presence-entity__image",
+            ".global-nav__me img",
+            "img.global-nav__me-photo",
+            "img[alt^='Profile photo of']",
+            "img[src*='profile-displayphoto-shrink']"
           ];
 
           for (const sel of selectors) {
@@ -181,12 +183,6 @@ document.getElementById("analyze").onclick = async () => {
             if (img && img.src && !img.src.includes('data:image/gif')) {
               return img.src;
             }
-          }
-
-          // Fallback: the small avatar in the top navigation bar (guaranteed to exist for logged in user)
-          const navImg = document.querySelector('img.global-nav__me-photo');
-          if (navImg && navImg.src) {
-            return navImg.src;
           }
 
           return null;

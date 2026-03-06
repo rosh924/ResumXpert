@@ -87,6 +87,7 @@ export default function SeekerDashboard() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [proxyImage, setProxyImage] = useState<string | null>(null);
 
   const jobRole = (location.state as any)?.jobRole || "";
   const jobDescription = (location.state as any)?.jobDescription || "";
@@ -134,6 +135,19 @@ export default function SeekerDashboard() {
 
         const data = await response.json();
         setResult(data);
+
+        // Fetch proxy image for PDF rendering to avoid CORS issues
+        if (data?.candidate?.picture) {
+          try {
+            const imgRes = await fetch(`http://127.0.0.1:5000/proxy-image?url=${encodeURIComponent(data.candidate.picture)}`);
+            const imgData = await imgRes.json();
+            if (imgData.data_url) {
+              setProxyImage(imgData.data_url);
+            }
+          } catch (e) {
+            console.error("Failed to proxy image:", e);
+          }
+        }
       } catch (err: any) {
         console.error("Error fetching analysis:", err);
         setError(err.message || "Failed to fetch analysis");
@@ -184,12 +198,15 @@ export default function SeekerDashboard() {
       // Hide the print container again
       printRef.current.style.display = 'none';
 
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgData = canvas.toDataURL("image/jpeg", 0.98);
 
-      pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, pdfHeight);
+      const pdfWidth = 210; // Standard A4 width in mm
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      // Create a single-page PDF with custom height that exactly fits the content
+      const pdf = new jsPDF("p", "mm", [pdfWidth, imgHeight]);
+      pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, imgHeight);
+
       pdf.save(`ResumXpert_Report_${result?.candidate?.name?.replace(/\s+/g, "_") || "Candidate"}.pdf`);
     } catch (err: any) {
       console.error("PDF generation failed:", err);
@@ -246,49 +263,121 @@ export default function SeekerDashboard() {
   const PrintableReport = () => (
     <div
       ref={printRef}
-      style={{ display: 'none', background: 'white', color: 'black', width: '794px', padding: '40px', fontFamily: 'sans-serif' }}
+      style={{ display: 'none', background: '#ffffff', color: '#0f172a', width: '794px', padding: '50px', fontFamily: 'Arial, sans-serif' }}
     >
-      <div style={{ borderBottom: '2px solid #2563eb', paddingBottom: '20px', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 'bold', margin: '0 0 5px 0', color: '#0f172a' }}>{result?.candidate?.name || "Candidate Report"}</h1>
-        <p style={{ fontSize: '16px', color: '#475569', margin: '0 0 10px 0' }}>{result?.candidate?.headline || "Career Professional"}</p>
-        <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Target Role: <strong>{jobRole}</strong></p>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '3px solid #ea580c', paddingBottom: '15px', marginBottom: '30px' }}>
+        <div>
+          <h1 style={{ fontSize: '32px', fontWeight: '900', margin: '0 0 5px 0', color: '#ea580c', letterSpacing: '-0.5px' }}>ResumXpert</h1>
+          <p style={{ fontSize: '14px', color: '#64748b', margin: 0, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>AI Career Coach Report</p>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0, fontWeight: '500' }}>Generated on {new Date().toLocaleDateString()}</p>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
-        <div style={{ width: '48%', background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: '18px', margin: '0 0 15px 0', color: '#0f172a', borderBottom: '1px solid #cbd5e1', paddingBottom: '10px' }}>ATS Match Score</h2>
-          <div style={{ fontSize: '48px', fontWeight: 'bold', color: result.ats_score > 70 ? '#16a34a' : result.ats_score > 40 ? '#ca8a04' : '#dc2626' }}>
-            {result.ats_score}%
+      {/* Candidate Profile Highlight */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '25px', marginBottom: '40px', background: '#fff7ed', padding: '25px', borderRadius: '16px', border: '1px solid #fed7aa' }}>
+        <div style={{ width: '90px', height: '90px', borderRadius: '50%', overflow: 'hidden', border: '3px solid #ea580c', flexShrink: 0, background: '#ffffff', boxShadow: '0 4px 6px rgba(234,88,12,0.1)' }}>
+          {proxyImage || result?.candidate?.picture ? (
+            <img src={proxyImage || result.candidate.picture} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
+          ) : (
+            <div style={{ width: '100%', height: '100%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '12px', fontWeight: 'bold' }}>N/A</div>
+          )}
+        </div>
+        <div>
+          <h2 style={{ fontSize: '26px', fontWeight: '800', margin: '0 0 8px 0', color: '#0f172a' }}>{result?.candidate?.name || "Candidate Name"}</h2>
+          <p style={{ fontSize: '16px', color: '#475569', margin: '0 0 10px 0', lineHeight: '1.4' }}>{result?.candidate?.headline || "Career Professional"}</p>
+          <div style={{ display: 'inline-block', background: '#ea580c', color: '#ffffff', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold' }}>
+            Target Role: {jobRole}
           </div>
-          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '10px' }}>Match rate against standard {jobRole} requirements.</p>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div style={{ display: 'flex', gap: '20px', marginBottom: '40px' }}>
+        <div style={{ flex: 1, background: '#ffffff', padding: '25px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '14px', margin: '0 0 10px 0', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>ATS Match Score</h2>
+          <div style={{ fontSize: '56px', fontWeight: '900', color: result.ats_score > 70 ? '#16a34a' : result.ats_score > 40 ? '#ca8a04' : '#dc2626', lineHeight: '1' }}>
+            {Math.round(result.ats_score)}%
+          </div>
+          <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '12px', marginBottom: 0 }}>Against {jobRole} standard requirements</p>
         </div>
 
-        <div style={{ width: '48%', background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: '18px', margin: '0 0 15px 0', color: '#0f172a', borderBottom: '1px solid #cbd5e1', paddingBottom: '10px' }}>Skills to Acquire</h2>
+        <div style={{ flex: 1, background: '#ffffff', padding: '25px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+          <h2 style={{ fontSize: '14px', margin: '0 0 15px 0', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>Skills to Acquire</h2>
           {result.missing_skills?.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: '20px', color: '#dc2626', fontSize: '14px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {result.missing_skills.map((skill: string, i: number) => (
-                <li key={i} style={{ marginBottom: '5px' }}>{skill}</li>
+                <span key={i} style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', border: '1px solid #fecaca' }}>
+                  + {skill}
+                </span>
               ))}
-            </ul>
+            </div>
           ) : (
-            <p style={{ color: '#16a34a', fontSize: '14px' }}>Profile is highly optimized for this role.</p>
+            <p style={{ color: '#16a34a', fontSize: '15px', fontWeight: '600', margin: 0 }}>Profile is highly optimized for this role.</p>
           )}
         </div>
       </div>
 
-      <div style={{ marginBottom: '30px' }}>
-        <h2 style={{ fontSize: '20px', margin: '0 0 15px 0', color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '5px' }}>Recommended Roadmap</h2>
-        {result.roadmap?.map((step: any, i: number) => (
-          <div key={i} style={{ marginBottom: '15px' }}>
-            <h3 style={{ fontSize: '16px', margin: '0 0 5px 0', color: '#334155' }}>Step {i + 1}: {step.step || `Category ${i + 1}`}</h3>
-            <p style={{ fontSize: '14px', margin: 0, color: '#475569' }}>{step.topic}</p>
-          </div>
-        ))}
+      {/* Roadmap */}
+      <div style={{ marginBottom: '40px' }}>
+        <h2 style={{ fontSize: '18px', margin: '0 0 20px 0', color: '#0f172a', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', fontWeight: '800' }}>Personalized Learning Roadmap</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          {result.roadmap?.map((step: any, i: number) => (
+            <div key={i} style={{ display: 'flex', gap: '15px', background: '#f8fafc', padding: '15px 20px', borderRadius: '12px', borderLeft: '4px solid #ea580c' }}>
+              <div style={{ background: '#ea580c', color: 'white', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', flexShrink: 0, fontSize: '14px' }}>
+                {i + 1}
+              </div>
+              <div>
+                <h3 style={{ fontSize: '16px', margin: '0 0 5px 0', color: '#0f172a', fontWeight: 'bold' }}>{step.skill} <span style={{ fontSize: '13px', color: '#ea580c', fontWeight: 'normal' }}>({step.duration})</span></h3>
+                <p style={{ fontSize: '14px', margin: 0, color: '#475569', lineHeight: '1.5' }}>{step.topic}</p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div style={{ marginTop: '40px', borderTop: '1px solid #e2e8f0', paddingTop: '20px', textAlign: 'center', fontSize: '12px', color: '#94a3b8' }}>
-        Generated by ResumXpert - AI Career Coach
+      {/* Courses */}
+      {result.courses && result.courses.length > 0 && (
+        <div style={{ marginBottom: '40px', pageBreakInside: 'avoid' }}>
+          <h2 style={{ fontSize: '18px', margin: '0 0 20px 0', color: '#0f172a', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', fontWeight: '800' }}>Recommended Courses</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px' }}>
+            {result.courses.map((course: any, i: number) => (
+              <div key={i} style={{ background: '#ffffff', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <h4 style={{ fontSize: '15px', margin: '0 0 8px 0', color: '#0f172a', fontWeight: 'bold', lineHeight: '1.3' }}>{course.title}</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', background: '#f1f5f9', padding: '3px 8px', borderRadius: '4px', color: '#475569', fontWeight: '600' }}>{course.platform}</span>
+                  <span style={{ fontSize: '13px', color: '#ca8a04', fontWeight: 'bold' }}>★ {course.rating}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Projects */}
+      {result.projects && result.projects.length > 0 && (
+        <div style={{ marginBottom: '20px', pageBreakInside: 'avoid' }}>
+          <h2 style={{ fontSize: '18px', margin: '0 0 20px 0', color: '#0f172a', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', fontWeight: '800' }}>Open Source Projects</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {result.projects.map((proj: any, i: number) => (
+              <div key={i} style={{ background: '#ffffff', padding: '15px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <h4 style={{ fontSize: '16px', margin: 0, color: '#0f172a', fontWeight: 'bold' }}>{proj.name}</h4>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>★ {proj.stars}</span>
+                </div>
+                <p style={{ fontSize: '14px', color: '#475569', margin: 0, lineHeight: '1.4' }}>{proj.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{ marginTop: '50px', borderTop: '2px dotted #cbd5e1', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94a3b8', fontWeight: '500' }}>
+        <span>Generated by ResumXpert</span>
+        <span>Confidential & Proprietary</span>
       </div>
     </div>
   );

@@ -460,7 +460,7 @@ def analyze_recruiter():
         linkedin_url = cand.get("linkedin_url", "")
         
         # Combined text for embedding
-        profile_text = f"{headline} {' '.join(skills)}"
+        profile_text = f"{headline} \n {', '.join(skills)}"
         
         # Local calculation
         ats_score, missing_skills, matched_skills = calculate_ats_score(profile_text, job_description, skills)
@@ -523,7 +523,10 @@ def proxy_image():
         return jsonify({"error": "No URL provided"}), 400
         
     try:
-        response = requests.get(image_url, stream=True, timeout=5)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(image_url, headers=headers, stream=True, timeout=5)
         response.raise_for_status()
         
         # Convert response content to base64
