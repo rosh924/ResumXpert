@@ -94,28 +94,188 @@ export default function RecruiterDashboard() {
 
   const reportRef = useRef<HTMLDivElement>(null);
 
-  const handleDownloadReport = async () => {
-    if (!reportRef.current) return;
-
+  const loadImageData = async (url: string): Promise<string> => {
     try {
-      window.scrollTo(0, 0);
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const response = await fetch(`http://127.0.0.1:5000/proxy-image?url=${encodeURIComponent(url)}`);
+      const data = await response.json();
+      if (data.data_url) {
+        return data.data_url;
+      }
+      throw new Error(data.error || "Failed to load image");
+    } catch (err) {
+      console.warn("Proxy image failed:", err);
+      throw err;
+    }
+  };
 
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        backgroundColor: "#020617",
-        useCORS: true,
+  const handleDownloadReport = async () => {
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 20;
+      let currentY = margin;
+
+      const addFooter = (doc: jsPDF, pageNum: number) => {
+        const str = `Page ${pageNum}`;
+        doc.setFontSize(10);
+        doc.setTextColor(150);
+        doc.text("ResumXpert \xA9 " + new Date().getFullYear(), margin, pageHeight - 10);
+        doc.text(str, pageWidth - margin - doc.getTextWidth(str), pageHeight - 10);
+      };
+
+      // Header
+      pdf.setFontSize(24);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(30, 58, 138);
+      pdf.text("ResumXpert Recruiter Report", margin, currentY);
+      currentY += 10;
+
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(100);
+      pdf.text(`Target Role: ${jobRole.replace(/[^\x20-\x7E]/g, '')}`, margin, currentY);
+      pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin - 50, currentY);
+      currentY += 15;
+
+      pdf.setDrawColor(200);
+      pdf.line(margin, currentY, pageWidth - margin, currentY);
+      currentY += 10;
+
+      // Featured Candidate Analysis
+      if (topCandidates.length > 0) {
+        const featured = topCandidates[0];
+        const isFit = featured.ats_score >= 70;
+
+        pdf.setFontSize(18);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(0);
+        pdf.text("Featured Candidate Analysis", margin, currentY);
+        currentY += 10;
+
+        const picSize = 25;
+        let textStartX = margin;
+        let afterPicY = currentY;
+
+        if (featured.picture) {
+          try {
+            const imgData = await loadImageData(featured.picture);
+            pdf.addImage(imgData, 'PNG', margin, currentY, picSize, picSize);
+            pdf.setDrawColor(200);
+            pdf.rect(margin, currentY, picSize, picSize); // border
+            textStartX = margin + picSize + 10;
+            afterPicY = currentY + picSize + 5;
+          } catch (e) {
+            console.warn("Could not load candidate picture for PDF.");
+          }
+        }
+
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "bold");
+        pdf.text((featured.name || "Candidate").replace(/[^\x20-\x7E]/g, ''), textStartX, currentY + 5);
+
+        pdf.setFontSize(11);
+        pdf.setFont("helvetica", "italic");
+        pdf.setTextColor(100);
+        const cleanHeadline = (featured.headline || "Professional").replace(/[^\x20-\x7E]/g, '');
+        const cleanLocation = (featured.location || "Unknown").replace(/[^\x20-\x7E]/g, '');
+        pdf.text(`${cleanHeadline} | ${cleanLocation}`, textStartX, currentY + 11);
+
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(0);
+        const fitTextY = currentY + 19;
+        pdf.text(`Overall Fit: `, textStartX, fitTextY);
+        pdf.setTextColor(isFit ? 34 : 220, isFit ? 197 : 38, isFit ? 94 : 38);
+        pdf.text(isFit ? "YES (Strong Match)" : "NO (Needs Improvement)", textStartX + 25, fitTextY);
+        pdf.setTextColor(0);
+
+        // Ensure we advance past picture block
+        currentY = Math.max(fitTextY + 10, afterPicY);
+
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        const cleanSummary = (featured.summary || "No summary available.").replace(/[^\x20-\x7E]/g, '');
+        const summaryLines = pdf.splitTextToSize(cleanSummary, pageWidth - margin * 2);
+        pdf.text(summaryLines, margin, currentY);
+        currentY += (summaryLines.length * 5) + 5;
+
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Matched Skills", margin, currentY);
+        currentY += 5;
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        const matchedArr = Array.isArray(featured.matched_skills) ? featured.matched_skills : [];
+        const matchedText = matchedArr.length > 0 ? matchedArr.join(", ").replace(/[^\x20-\x7E]/g, '') : "None detected.";
+        const matchedLines = pdf.splitTextToSize(`\u2022 ${matchedText}`, pageWidth - margin * 2);
+        pdf.text(matchedLines, margin, currentY);
+        currentY += (matchedLines.length * 5) + 5;
+
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Missing Skills", margin, currentY);
+        currentY += 5;
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        const missingArr = Array.isArray(featured.missing_skills) ? featured.missing_skills : [];
+        const missingText = missingArr.length > 0 ? missingArr.join(", ").replace(/[^\x20-\x7E]/g, '') : "None detected.";
+        const missingLines = pdf.splitTextToSize(`\u2022 ${missingText}`, pageWidth - margin * 2);
+        pdf.text(missingLines, margin, currentY);
+        currentY += (missingLines.length * 5) + 10;
+
+        pdf.setDrawColor(200);
+        pdf.line(margin, currentY, pageWidth - margin, currentY);
+        currentY += 10;
+      }
+
+      // Add Top Candidates Table
+      pdf.setFontSize(16);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(0);
+      pdf.text("Database Matches", margin, currentY);
+      currentY += 8;
+
+      pdf.setFillColor(245, 245, 245);
+      pdf.rect(margin, currentY, pageWidth - margin * 2, 8, "F");
+      pdf.setFontSize(10);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("Rank", margin + 2, currentY + 6);
+      pdf.text("Name", margin + 15, currentY + 6);
+      pdf.text("Location", margin + 80, currentY + 6);
+      pdf.text("LinkedIn", margin + 125, currentY + 6);
+      pdf.text("Match", pageWidth - margin - 20, currentY + 6);
+      currentY += 12;
+
+      pdf.setFont("helvetica", "normal");
+      topCandidates.forEach((c, index) => {
+        const isFit = c.ats_score >= 70;
+        pdf.text(`#${index + 1}`, margin + 2, currentY);
+        pdf.text((c.name || "Unknown").replace(/[^\x20-\x7E]/g, '').substring(0, 30), margin + 15, currentY);
+        pdf.text((c.location || "Unknown").replace(/[^\x20-\x7E]/g, '').substring(0, 20), margin + 80, currentY);
+
+        if (c.linkedin_url && c.linkedin_url.includes("linkedin.com")) {
+          pdf.setTextColor(0, 102, 204);
+          pdf.textWithLink("Profile Link", margin + 125, currentY, { url: c.linkedin_url });
+          pdf.setTextColor(0);
+        } else {
+          pdf.text("-", margin + 125, currentY);
+        }
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(isFit ? 34 : 100, isFit ? 197 : 100, isFit ? 94 : 100);
+        pdf.text(`${Math.round(c.ats_score)}%`, pageWidth - margin - 20, currentY);
+        pdf.setFont("helvetica", "normal");
+        pdf.setTextColor(0);
+
+        currentY += 8;
       });
 
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-      pdf.save("Recruiter_Summary_Report.pdf");
+      addFooter(pdf, 1);
+      pdf.save(`Recruiter_Report.pdf`);
     } catch (err) {
       console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF. Check console for details.");
     }
   };
 

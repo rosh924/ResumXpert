@@ -53,10 +53,22 @@ def init_db():
                 skills TEXT,
                 ats_score REAL,
                 job_role TEXT,
+                picture TEXT,
+                summary TEXT,
+                matched_skills TEXT,
+                linkedin_url TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         conn.commit()
+        # Add new columns if they don't exist
+        for col in ['picture', 'summary', 'missing_skills', 'matched_skills', 'linkedin_url']:
+            try:
+                c.execute(f"ALTER TABLE candidates ADD COLUMN {col} TEXT")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                
         conn.close()
         print("Database initialized.")
     except Exception as e:
@@ -172,14 +184,16 @@ def calculate_ats_score(resume_text, job_description, input_skills):
     
     # Find phrases in JD that are NOT in Resume
     missing_phrases = jd_phrases - resume_phrases
+    matched_phrases = jd_phrases.intersection(resume_phrases)
     
     # Filter logic: Prefer longer phrases if they are subsets of each other?
     # For simplicity, we just take the top distinct ones.
     # We remove very short or generic words if needed, but 'english' stop_words handles most.
     
-    sorted_missing = sorted(list(missing_phrases), key=len, reverse=True)[:5]
+    sorted_missing = sorted(list(missing_phrases), key=len, reverse=True)[:10]
+    sorted_matched = sorted(list(matched_phrases), key=len, reverse=True)[:10]
     
-    return round(float(score), 2), sorted_missing
+    return round(float(score), 2), sorted_missing, sorted_matched
 
 def analyze_gap_with_groq(resume_text, job_description, job_role):
     """
@@ -357,7 +371,7 @@ def analyze_seeker():
         return jsonify({"error": "Invalid request format"}), 400
 
     # 2. ATS Scoring (Numeric Only) - Keep Cosine Similarity for the score
-    ats_score, _ = calculate_ats_score(
+    ats_score, _, _ = calculate_ats_score(
         resume_text, 
         job_description, 
         candidate_details.get("skills", [])
@@ -442,26 +456,30 @@ def analyze_recruiter():
         skills = cand.get("skills", [])
         headline = cand.get("headline", "")
         location = cand.get("location", "Unknown")
+        picture = cand.get("picture", "")
+        linkedin_url = cand.get("linkedin_url", "")
         
         # Combined text for embedding
         profile_text = f"{headline} {' '.join(skills)}"
         
         # Local calculation
-        ats_score, _ = calculate_ats_score(profile_text, job_description, skills)
+        ats_score, missing_skills, matched_skills = calculate_ats_score(profile_text, job_description, skills)
+        
+        summary = f"{name} is an applicant for {job_role} with key skills in {', '.join(matched_skills[:3]) if matched_skills else 'their respective field'}."
         
         # Insert into DB (Postgres uses %s for parameters)
         c.execute('''
-            INSERT INTO candidates (name, headline, location, skills, ats_score, job_role)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (name, headline, location, json.dumps(skills), ats_score, job_role))
+            INSERT INTO candidates (name, headline, location, skills, ats_score, job_role, picture, summary, missing_skills, matched_skills, linkedin_url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (name, headline, location, json.dumps(skills), ats_score, job_role, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url))
     
     conn.commit()
     
     # Fetch Top candidates for this role (Global Ranking) with Deduplication
     c.execute('''
-        SELECT name, headline, location, skills, ats_score
+        SELECT name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url
         FROM (
-            SELECT DISTINCT ON (name) name, headline, location, skills, ats_score 
+            SELECT DISTINCT ON (name) name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url 
             FROM candidates 
             WHERE job_role = %s 
             ORDER BY name, ats_score DESC
@@ -480,13 +498,44 @@ def analyze_recruiter():
             "headline": r["headline"],
             "location": r["location"],
             "skills": json.loads(r["skills"]) if isinstance(r["skills"], str) else r["skills"],
-            "ats_score": r["ats_score"]
+            "ats_score": r["ats_score"],
+            "picture": r.get("picture", ""),
+            "summary": r.get("summary", ""),
+            "missing_skills": json.loads(r["missing_skills"]) if isinstance(r.get("missing_skills"), str) else r.get("missing_skills", []) or [],
+            "matched_skills": json.loads(r["matched_skills"]) if isinstance(r.get("matched_skills"), str) else r.get("matched_skills", []) or [],
+            "linkedin_url": r.get("linkedin_url", "")
         })
     
     return jsonify({
         "ranked_candidates": ranked_candidates,
         "top_5": ranked_candidates[:5]
     })
+
+import base64
+
+@app.route("/proxy-image")
+def proxy_image():
+    """
+    Downloads an image and returns it as a Base64 string to bypass CORS issues in the frontend PDF generator.
+    """
+    image_url = request.args.get('url')
+    if not image_url:
+        return jsonify({"error": "No URL provided"}), 400
+        
+    try:
+        response = requests.get(image_url, stream=True, timeout=5)
+        response.raise_for_status()
+        
+        # Convert response content to base64
+        base64_encoded = base64.b64encode(response.content).decode('utf-8')
+        content_type = response.headers.get('Content-Type', 'image/jpeg')
+        
+        # Determine format for data URL
+        data_url = f"data:{content_type};base64,{base64_encoded}"
+        return jsonify({"data_url": data_url})
+    except Exception as e:
+        print(f"Image Proxy Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
