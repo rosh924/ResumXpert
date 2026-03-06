@@ -3,8 +3,44 @@ document.getElementById("analyze").onclick = async () => {
 
   chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => {
+    func: async () => {
       try {
+        // Auto-scroll the page to force LinkedIn to load lazy content (like Skills)
+        await new Promise((resolve) => {
+          let totalHeight = 0;
+          let distance = 800;
+          let maxScrolls = 40; 
+          let currentScroll = 0;
+          
+          let timer = setInterval(() => {
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+            currentScroll++;
+
+            // Aggressively click any "Show all X" or "See all" buttons while scrolling
+            const elementsToClick = document.querySelectorAll('button, a, span.artdeco-button__text');
+            for(let el of elementsToClick) {
+              // Strictly forbid clicking on anything in right-sidebar or 'People also viewed' sections
+              if (el.closest && el.closest('aside, .scaffold-layout__aside, .right-rail')) continue;
+              const text = (el.innerText || "").toLowerCase().trim();
+              if ((text.includes('show all') || text.includes('see all') || text.includes('show more')) && (text.includes('skills') || text === 'show all' || text === 'show more')) {
+                try { el.click(); } catch(e) {}
+              }
+            }
+
+            // Forcibly remove 'visually-hidden' classes to expose hidden text
+            document.querySelectorAll('.visually-hidden, .sr-only').forEach(el => {
+               el.classList.remove('visually-hidden', 'sr-only');
+            });
+
+            if (currentScroll >= maxScrolls || totalHeight >= document.body.scrollHeight) {
+              clearInterval(timer);
+              window.scrollTo(0, 0); // scroll back to top
+              setTimeout(resolve, 2000); // Wait 2s for all React nodes to finish rendering
+            }
+          }, 150);
+        });
+
         // Helper to clean text
         const clean = (text) => text ? text.replace(/\s+/g, ' ').trim() : "";
 
@@ -25,9 +61,17 @@ document.getElementById("analyze").onclick = async () => {
 
           // Fallback to page title
           let titleName = clean(document.title.split('|')[0]);
-          if (titleName && titleName !== "LinkedIn") return titleName;
+          if (titleName && titleName !== "LinkedIn" && titleName !== "Feed" && !titleName.includes("Search")) {
+             // LinkedIn titles typically have " | LinkedIn" or similar, so split by "|" or "-" often leaves the exact name
+             const namePart = titleName.split('-')[0].trim();
+             return namePart.replace('LinkedIn', '').trim();
+          }
 
-          return textLines.length > 0 ? textLines[0] : "";
+          // If all else fails, query specific elements that house names
+          const nameEl = document.querySelector('h1.text-heading-xlarge[data-test-id="hero__headline"]');
+          if (nameEl) return clean(nameEl.innerText);
+
+          return "";
         };
 
         const getHeadline = () => {
@@ -85,83 +129,67 @@ document.getElementById("analyze").onclick = async () => {
         };
 
         const getSkills = () => {
-          let skills = [];
+          let skills = new Set();
+          
+          // Method 1: Target the skill pills in the new UI explicitly
+          const skillPills = document.querySelectorAll('a[data-field="skill_card_skeleton"] span[aria-hidden="true"], a[href*="/details/skills/"] span[aria-hidden="true"], .pv-skill-category-entity__name-text');
+          skillPills.forEach(el => {
+              if (el.innerText && el.innerText.trim().length > 1) {
+                  skills.add(el.innerText.trim());
+              }
+          });
 
-          // These are exact matches to ignore
-          const exactNoise = [
-            "show all", "endorse", "endorsed", "passed", "assessment", "connections", "·", "and",
-            "industry knowledge", "tools & technologies", "interpersonal skills", "other skills",
-            "all", "skills", "endorsement", "endorsements", "messaging", "notifications",
-            "me", "for business", "learning", "jobs", "network", "home", "search",
-            "back", "next", "save", "try premium", "enhance profile", "add section",
-            "show details", "hide details", "top skills", "languages", "certifications",
-            "recommendations", "courses", "honors & awards", "organizations"
-          ];
-
+          // Method 2: Target the "About" or "Skills" summary sections specifically
+          const skillSummaryContainers = document.querySelectorAll('.pv-about-section .pv-about__summary-text, .inline-show-more-text--is-collapsed span[aria-hidden="true"]');
+          const exactNoise = ["show all", "endorse", "all", "skills", "messaging", "notifications", "me", "for business", "learning", "jobs", "network", "home", "search", "back", "next", "save", "try premium", "enhance profile", "add section", "show details", "hide details", "top skills"];
+          
           const isNoise = (s) => {
-            if (!s || s.length < 2 || s.length > 50) return true;
-
-            const lower = s.toLowerCase();
-
-            // Check exact matches
-            if (exactNoise.some(n => lower === n)) return true;
-
-            // Check substring matches (LinkedIn UI garbage)
-            if (
-              lower.includes("endorse") ||
-              lower.includes("show all") ||
-              lower.includes("mutual connection") ||
-              lower.includes(" at ") || // e.g. "Software Engineer at Google"
-              lower.includes(" working in ") ||
-              lower.includes(" connections") ||
-              lower.includes(" followers") ||
-              lower.endsWith("...") || // Truncated text
-              /^\d/.test(lower) // Starts with a number (like "12 endorsements")
-            ) {
-              return true;
-            }
-
-            return false;
+              const lower = s.toLowerCase();
+              if (s.length < 2 || s.length > 50) return true;
+              if (exactNoise.some(n => lower === n)) return true;
+              if (lower.includes("endorse") || lower.includes("show all") || lower.includes("mutual connection") || lower.includes(" at ") || lower.includes(" working in ") || lower.includes(" connections") || lower.includes(" followers") || lower.endsWith("...") || /^\d/.test(lower)) return true;
+              return false;
           };
 
+          // Method 3: Fallback to the aggressive text-line parsing only if DOM methods failed to find anything
+          if (skills.size === 0) {
+            let startIndex = textLines.findIndex(l => {
+              const lower = l.toLowerCase();
+              return lower === 'skills' || lower === 'top skills' || lower === 'skills & endorsements' || lower === 'skills and endorsements';
+            });
 
-          // Find where the Skills section begins
-          let startIndex = textLines.findIndex(l => l.toLowerCase() === 'skills');
+            if (startIndex === -1 && window.location.href.includes('/details/skills')) {
+              startIndex = 0;
+            }
 
-          // If we are on the dedicated skills page, we can just start from the top
-          if (startIndex === -1 && window.location.href.includes('/details/skills')) {
-            startIndex = 0;
-          }
+            if (startIndex !== -1) {
+              let consecutiveFailures = 0;
+              for (let i = startIndex + 1; i < textLines.length; i++) {
+                const line = textLines[i];
+                const lowerLine = line.toLowerCase();
+                const stopSections = [
+                  "interests", "languages", "certifications", "education", 
+                  "experience", "projects", "honors & awards", "volunteering", 
+                  "recommendations", "causes", "people also viewed", "you might like", 
+                  "similar profiles", "others named"
+                ];
 
-          if (startIndex !== -1) {
-            let consecutiveFailures = 0;
-            // Iterate down the page text grabbing everything that looks like a skill
-            for (let i = startIndex + 1; i < textLines.length; i++) {
-              const line = textLines[i];
-              const lowerLine = line.toLowerCase();
+                if (!window.location.href.includes('/details/skills') && stopSections.includes(lowerLine)) break;
 
-              // Stop condition: We hit another major profile section header
-              const stopSections = ["interests", "languages", "certifications", "education", "experience", "projects", "honors & awards", "volunteering", "recommendations", "causes"];
-              if (!window.location.href.includes('/details/skills') && stopSections.includes(lowerLine)) {
-                break;
+                if (!isNoise(line)) {
+                  skills.add(line);
+                  consecutiveFailures = 0;
+                } else {
+                  consecutiveFailures++;
+                }
+
+                if (consecutiveFailures > 50) break;
+                if (skills.size > 150) break;
               }
-
-              if (!isNoise(line)) {
-                skills.push(line);
-                consecutiveFailures = 0;
-              } else {
-                consecutiveFailures++;
-              }
-
-              // If we hit 50 garbage lines in a row, we've probably wandered into the footer
-              if (consecutiveFailures > 50) break;
-
-              // Hard cap
-              if (skills.length > 150) break;
             }
           }
 
-          return [...new Set(skills)];
+          return Array.from(skills);
         };
 
         const getProfilePicture = () => {
@@ -176,16 +204,25 @@ document.getElementById("analyze").onclick = async () => {
             "img.global-nav__me-photo",
             "img[alt^='Profile photo of']",
             "img[src*='profile-displayphoto-shrink']"
+          const headerSelectors = [
+            ".ph5 .pv-top-card-profile-picture__image", 
+            ".ph5 img.profile-photo-edit__preview",
+            ".ph5 img.ghost-person",
+            "section:first-of-type .pv-top-card__photo img",
+            "img.pv-top-card-profile-picture__image",
+            "img.profile-photo-edit__preview"
           ];
 
-          for (const sel of selectors) {
+          for (const sel of headerSelectors) {
             const img = document.querySelector(sel);
+            // Must be an actual image, not a base64 GIF blank placeholder
             if (img && img.src && !img.src.includes('data:image/gif')) {
               return img.src;
             }
           }
 
           return null;
+          return null; // Don't fall back to random navigation avatars
         };
 
         const profile = {

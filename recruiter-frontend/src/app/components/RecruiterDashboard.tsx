@@ -125,42 +125,50 @@ export default function RecruiterDashboard() {
         doc.text(str, pageWidth - margin - doc.getTextWidth(str), pageHeight - 10);
       };
 
+      const checkPageBreak = (neededHeight: number) => {
+        if (currentY + neededHeight > pageHeight - margin - 15) {
+          pdf.addPage();
+          currentY = margin + 10; // Extra padding at top of new page
+        }
+      };
+
       // Header
       pdf.setFontSize(24);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(30, 58, 138);
-      pdf.text("ResumXpert Recruiter Report", margin, currentY);
-      currentY += 10;
+      pdf.text("ResumXpert Recruiter Report", margin, currentY + 5);
+      currentY += 15;
 
       pdf.setFontSize(12);
       pdf.setFont("helvetica", "normal");
       pdf.setTextColor(100);
       pdf.text(`Target Role: ${jobRole.replace(/[^\x20-\x7E]/g, '')}`, margin, currentY);
       pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin - 50, currentY);
-      currentY += 15;
+      currentY += 10;
 
       pdf.setDrawColor(200);
       pdf.line(margin, currentY, pageWidth - margin, currentY);
       currentY += 10;
 
-      // Featured Candidate Analysis
-      if (topCandidates.length > 0) {
-        const featured = topCandidates[0];
-        const isFit = featured.ats_score >= 70;
+      // Detailed Candidates Analysis
+      for (let i = 0; i < topCandidates.length; i++) {
+        const candidate = topCandidates[i];
+        const isFit = candidate.ats_score >= 70;
 
+        checkPageBreak(30);
         pdf.setFontSize(18);
         pdf.setFont("helvetica", "bold");
         pdf.setTextColor(0);
-        pdf.text("Featured Candidate Analysis", margin, currentY);
+        pdf.text(`Rank #${i + 1}: Candidate Analysis`, margin, currentY);
         currentY += 10;
 
         const picSize = 25;
         let textStartX = margin;
         let afterPicY = currentY;
 
-        if (featured.picture) {
+        if (candidate.picture) {
           try {
-            const imgData = await loadImageData(featured.picture);
+            const imgData = await loadImageData(candidate.picture);
             pdf.addImage(imgData, 'PNG', margin, currentY, picSize, picSize);
             pdf.setDrawColor(200);
             pdf.rect(margin, currentY, picSize, picSize); // border
@@ -173,64 +181,111 @@ export default function RecruiterDashboard() {
 
         pdf.setFontSize(14);
         pdf.setFont("helvetica", "bold");
-        pdf.text((featured.name || "Candidate").replace(/[^\x20-\x7E]/g, ''), textStartX, currentY + 5);
+        pdf.text((candidate.name || "Candidate").replace(/[^\x20-\x7E]/g, ''), textStartX, currentY + 5);
 
         pdf.setFontSize(11);
         pdf.setFont("helvetica", "italic");
         pdf.setTextColor(100);
-        const cleanHeadline = (featured.headline || "Professional").replace(/[^\x20-\x7E]/g, '');
-        const cleanLocation = (featured.location || "Unknown").replace(/[^\x20-\x7E]/g, '');
-        pdf.text(`${cleanHeadline} | ${cleanLocation}`, textStartX, currentY + 11);
+        const cleanHeadline = (candidate.headline || "Professional").replace(/[^\x20-\x7E]/g, '');
+        const cleanLocation = (candidate.location || "Unknown").replace(/[^\x20-\x7E]/g, '');
+        // split headline if it's too long
+        const headLocationLines = pdf.splitTextToSize(`${cleanHeadline} | ${cleanLocation}`, pageWidth - textStartX - margin);
+        pdf.text(headLocationLines, textStartX, currentY + 11);
 
         pdf.setFontSize(12);
         pdf.setFont("helvetica", "bold");
         pdf.setTextColor(0);
-        const fitTextY = currentY + 19;
+        const fitTextY = currentY + 14 + (headLocationLines.length * 5);
         pdf.text(`Overall Fit: `, textStartX, fitTextY);
         pdf.setTextColor(isFit ? 34 : 220, isFit ? 197 : 38, isFit ? 94 : 38);
         pdf.text(isFit ? "YES (Strong Match)" : "NO (Needs Improvement)", textStartX + 25, fitTextY);
         pdf.setTextColor(0);
 
-        // Ensure we advance past picture block
         currentY = Math.max(fitTextY + 10, afterPicY);
 
+        checkPageBreak(40);
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(0);
+        
+        // --- SUMMARY & WORK EXPERIENCE ---
+        pdf.text("Candidate Summary & Profile", margin, currentY);
+        currentY += 6;
         pdf.setFontSize(10);
         pdf.setFont("helvetica", "normal");
-        const cleanSummary = (featured.summary || "No summary available.").replace(/[^\x20-\x7E]/g, '');
+        const cleanSummary = (candidate.summary || "No summary available.").replace(/[^\x20-\x7E]/g, '');
         const summaryLines = pdf.splitTextToSize(cleanSummary, pageWidth - margin * 2);
-        pdf.text(summaryLines, margin, currentY);
-        currentY += (summaryLines.length * 5) + 5;
-
+        
+        // Draw summary line by line to allow pages breaking
+        for(let line of summaryLines) {
+           checkPageBreak(8);
+           pdf.text(line, margin, currentY);
+           currentY += 5;
+        }
+        currentY += 5;
+        
+        // --- VISUALIZATION: MATCHED VS MISSING SKILLS ---
+        checkPageBreak(40);
         pdf.setFontSize(12);
         pdf.setFont("helvetica", "bold");
-        pdf.text("Matched Skills", margin, currentY);
-        currentY += 5;
+        pdf.text("Skills Analysis Visualization", margin, currentY);
+        currentY += 8;
+        
+        const matchedArr = Array.isArray(candidate.matched_skills) ? candidate.matched_skills : [];
+        const missingArr = Array.isArray(candidate.missing_skills) ? candidate.missing_skills : [];
+        const totalSkills = Math.max(matchedArr.length + missingArr.length, 1);
+        const matchedPct = (matchedArr.length / totalSkills) * 100;
+        const missingPct = (missingArr.length / totalSkills) * 100;
+        
+        // Draw Matched Skills Bar
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(34, 197, 94); // Green
+        pdf.text(`Matched Skills (${matchedArr.length})`, margin, currentY);
+        pdf.setFillColor(34, 197, 94);
+        const maxBarWidth = pageWidth - margin * 2 - 50; 
+        const matchedWidth = maxBarWidth * (matchedPct / 100);
+        if(matchedWidth > 0) pdf.rect(margin + 40, currentY - 3, matchedWidth, 4, "F");
+        currentY += 8;
+        
+        // Draw Missing Skills Bar
+        pdf.setTextColor(239, 68, 68); // Red
+        pdf.text(`Missing Skills (${missingArr.length})`, margin, currentY);
+        pdf.setFillColor(239, 68, 68);
+        const missingWidth = maxBarWidth * (missingPct / 100);
+        if(missingWidth > 0) pdf.rect(margin + 40, currentY - 3, missingWidth, 4, "F");
+        currentY += 10;
+        
+        pdf.setTextColor(0);
         pdf.setFontSize(10);
         pdf.setFont("helvetica", "normal");
-        const matchedArr = Array.isArray(featured.matched_skills) ? featured.matched_skills : [];
         const matchedText = matchedArr.length > 0 ? matchedArr.join(", ").replace(/[^\x20-\x7E]/g, '') : "None detected.";
-        const matchedLines = pdf.splitTextToSize(`\u2022 ${matchedText}`, pageWidth - margin * 2);
-        pdf.text(matchedLines, margin, currentY);
-        currentY += (matchedLines.length * 5) + 5;
-
-        pdf.setFontSize(12);
-        pdf.setFont("helvetica", "bold");
-        pdf.text("Missing Skills", margin, currentY);
-        currentY += 5;
-        pdf.setFontSize(10);
-        pdf.setFont("helvetica", "normal");
-        const missingArr = Array.isArray(featured.missing_skills) ? featured.missing_skills : [];
+        const matchedLines = pdf.splitTextToSize(`[Matched]: ${matchedText}`, pageWidth - margin * 2);
+        for(let line of matchedLines) {
+           checkPageBreak(8);
+           pdf.text(line, margin, currentY);
+           currentY += 5;
+        }
+        currentY += 3;
+        
         const missingText = missingArr.length > 0 ? missingArr.join(", ").replace(/[^\x20-\x7E]/g, '') : "None detected.";
-        const missingLines = pdf.splitTextToSize(`\u2022 ${missingText}`, pageWidth - margin * 2);
-        pdf.text(missingLines, margin, currentY);
-        currentY += (missingLines.length * 5) + 10;
-
+        const missingLines = pdf.splitTextToSize(`[Missing]: ${missingText}`, pageWidth - margin * 2);
+        for(let line of missingLines) {
+           checkPageBreak(8);
+           pdf.text(line, margin, currentY);
+           currentY += 5;
+        }
+        currentY += 10;
+        
+        // Divider between candidates
         pdf.setDrawColor(200);
+        checkPageBreak(10);
         pdf.line(margin, currentY, pageWidth - margin, currentY);
         currentY += 10;
       }
 
       // Add Top Candidates Table
+      checkPageBreak(30);
       pdf.setFontSize(16);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(0);
@@ -250,10 +305,20 @@ export default function RecruiterDashboard() {
 
       pdf.setFont("helvetica", "normal");
       topCandidates.forEach((c, index) => {
+        checkPageBreak(12); // if table row exceeds, break BEFORE rendering row
+
         const isFit = c.ats_score >= 70;
         pdf.text(`#${index + 1}`, margin + 2, currentY);
-        pdf.text((c.name || "Unknown").replace(/[^\x20-\x7E]/g, '').substring(0, 30), margin + 15, currentY);
-        pdf.text((c.location || "Unknown").replace(/[^\x20-\x7E]/g, '').substring(0, 20), margin + 80, currentY);
+        
+        // Ensure name isn't too long
+        const cleanName = (c.name || "Unknown").replace(/[^\x20-\x7E]/g, '');
+        const shortName = cleanName.length > 25 ? cleanName.substring(0, 22) + '...' : cleanName;
+        pdf.text(shortName, margin + 15, currentY);
+        
+        // Ensure location isn't too long
+        const cleanLoc = (c.location || "Unknown").replace(/[^\x20-\x7E]/g, '');
+        const shortLoc = cleanLoc.length > 15 ? cleanLoc.substring(0, 12) + '...' : cleanLoc;
+        pdf.text(shortLoc, margin + 80, currentY);
 
         if (c.linkedin_url && c.linkedin_url.includes("linkedin.com")) {
           pdf.setTextColor(0, 102, 204);
@@ -272,7 +337,17 @@ export default function RecruiterDashboard() {
         currentY += 8;
       });
 
-      addFooter(pdf, 1);
+      // --- PAGE BORDERS AND FOOTERS ---
+      const pageCount = pdf.internal.pages.length - 1; 
+      for (let i = 1; i <= pageCount; i++) {
+        pdf.setPage(i);
+        pdf.setDrawColor(30, 58, 138); // Primary Blue Border
+        pdf.setLineWidth(1);
+        // Draw page margin border (x, y, w, h)
+        pdf.rect(10, 10, pageWidth - 20, pageHeight - 20);
+        addFooter(pdf, i);
+      }
+
       pdf.save(`Recruiter_Report.pdf`);
     } catch (err) {
       console.error("PDF generation failed:", err);
