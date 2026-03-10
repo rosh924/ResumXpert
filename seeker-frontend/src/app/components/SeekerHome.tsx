@@ -54,6 +54,7 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setResumeFile(e.target.files[0]);
+      setExtensionData(null); // Clear extension data if user uploads manually
     }
   };
 
@@ -63,10 +64,12 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
       job_description: jobDescription,
     };
 
-    if (extensionData) {
-      payload.extensionData = extensionData;
-    } else if (resumeFile) {
+    if (resumeFile) {
       payload.resumeFile = resumeFile;
+      payload.mode = "manual";
+    } else if (extensionData) {
+      payload.extensionData = extensionData;
+      payload.mode = "extension";
     }
 
     onStart(payload);
@@ -79,13 +82,13 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
   };
 
   // Validation for Continue
-  const canContinue = jobRole.trim() && (resumeFile || extensionData);
+  const canContinue = !!jobRole.trim() && (!!resumeFile || !!extensionData);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
       {/* Dynamic Background Elements */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] right-[-20%] w-[800px] h-[800px] bg-orange-400/10 rounded-full blur-[120px] animate-pulse-slow"></div>
+        <div className="absolute top-[-20%] right-[-20%] w-[800px] h-[800px] bg-primary/10 rounded-full blur-[120px] animate-pulse-slow"></div>
         <div className="absolute bottom-[-20%] left-[-20%] w-[600px] h-[600px] bg-primary/10 rounded-full blur-[100px] animate-pulse-slow" style={{ animationDelay: '2s' }}></div>
       </div>
 
@@ -101,7 +104,7 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", duration: 0.8 }}
-              className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 bg-gradient-to-br from-orange-400 to-orange-600 shadow-lg shadow-orange-500/25"
+              className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 bg-gradient-to-br from-primary to-orange-400 shadow-lg shadow-primary/25"
             >
               <Sparkles className="w-10 h-10 text-white" />
             </motion.div>
@@ -113,23 +116,96 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
             </p>
           </div>
 
-          {extensionData && (
-            <div className="mb-8 p-6 bg-primary/10 border border-primary/30 rounded-2xl flex items-center gap-4 text-foreground">
-              <div className="bg-primary text-primary-foreground p-3 rounded-full">
-                <CheckCircle className="w-6 h-6" />
+          {/* Flow Content */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            {/* Left Column: Input Method */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Upload className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-bold text-foreground opacity-80 uppercase tracking-wider">Analysis Profile</h3>
               </div>
-              <div>
-                <h3 className="font-bold text-lg">Profile Data Loaded from Extension</h3>
-                <p className="opacity-70 text-sm">We have your profile details ({extensionData.name}). Please provide the Target Job details below.</p>
-              </div>
-            </div>
-          )}
 
-          <div className="bg-background/40 border border-primary/20 rounded-2xl p-8 mb-8 backdrop-blur-md">
-            <div className="flex items-center gap-2 mb-6">
-              <Briefcase className="w-5 h-5 text-primary" />
-              <h3 className="text-sm font-bold text-foreground opacity-80 uppercase tracking-wider">Target Job Details</h3>
+              {extensionData ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-primary/10 border border-primary/30 rounded-2xl p-6 relative overflow-hidden group"
+                >
+                  <div className="absolute top-[-10px] right-[-10px] bg-primary/20 w-20 h-20 rounded-full blur-2xl group-hover:bg-primary/30 transition-colors"></div>
+                  <div className="flex items-start gap-4 relative z-10">
+                    <div className="bg-primary text-white p-3 rounded-xl shadow-lg shadow-primary/20">
+                      <CheckCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-foreground text-lg mb-1">{extensionData.name}</h4>
+                      <p className="text-sm text-foreground opacity-70 mb-3">{extensionData.headline}</p>
+                      <button
+                        onClick={() => setExtensionData(null)}
+                        className="text-xs font-bold text-primary hover:underline uppercase tracking-widest"
+                      >
+                        Change to Manual Upload
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="relative group">
+                    <input
+                      type="file"
+                      id="resume-upload"
+                      className="hidden"
+                      accept=".pdf"
+                      onChange={handleFileChange}
+                    />
+                    <label
+                      htmlFor="resume-upload"
+                      className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-8 cursor-pointer transition-all duration-300 ${resumeFile
+                        ? "border-emerald-500/50 bg-emerald-500/5"
+                        : "border-primary/20 bg-primary/5 hover:border-primary/50 hover:bg-primary/10"
+                        }`}
+                    >
+                      {resumeFile ? (
+                        <>
+                          <FileText className="w-12 h-12 text-emerald-500 mb-4" />
+                          <span className="text-emerald-700 font-bold">{resumeFile.name}</span>
+                          <span className="text-xs text-emerald-600 mt-2">Resume successfully selected</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-12 h-12 text-primary opacity-50 mb-4 group-hover:scale-110 transition-transform" />
+                          <span className="text-foreground font-bold">Upload Resume (PDF)</span>
+                          <span className="text-xs text-foreground opacity-50 mt-2 text-center">Drag and drop or click to browse</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-primary/10"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-[#FFF5F5] px-4 text-foreground opacity-40 font-bold tracking-widest">or</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-primary/10 border border-primary/20 rounded-2xl p-6 text-center">
+                    <Sparkles className="w-8 h-8 text-primary mx-auto mb-3" />
+                    <h4 className="font-bold text-foreground mb-1">Use Browser Extension</h4>
+                    <p className="text-xs text-foreground opacity-60 mb-4">Analyze directly from your LinkedIn profile for live data.</p>
+                    <div className="text-[10px] font-bold text-primary uppercase tracking-tighter opacity-80 animate-pulse">Waiting for Extension Data...</div>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Right Column: Job Details */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Briefcase className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-bold text-foreground opacity-80 uppercase tracking-wider">Target Job Details</h3>
+              </div>
 
             <div className="space-y-6">
               {/* Job Role Input */}
@@ -178,49 +254,19 @@ export default function SeekerHome({ onStart }: { onStart: (data: any) => void }
                   className="w-full bg-background/50 border border-primary/20 rounded-xl p-4 text-foreground placeholder:text-foreground/50 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all resize-none"
                 />
               </div>
-
-              {/* File Upload OR Manual */}
-              {!extensionData && (
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-foreground mb-2">Resume / LinkedIn Profile (PDF)</label>
-                  <div className={`border-2 border-dashed border-primary/20 rounded-xl p-8 transition-colors ${resumeFile ? "bg-primary/10 border-primary" : "hover:bg-primary/5 hover:border-primary/40"}`}>
-                    <input
-                      type="file"
-                      id="resume-upload"
-                      accept=".pdf"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                    <label htmlFor="resume-upload" className="flex flex-col items-center cursor-pointer">
-                      {resumeFile ? (
-                        <>
-                          <FileText className="w-12 h-12 text-primary mb-3" />
-                          <span className="text-foreground font-medium text-lg">{resumeFile.name}</span>
-                          <span className="text-foreground opacity-60 text-sm mt-1">Click to change</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-12 h-12 text-foreground opacity-50 mb-3" />
-                          <span className="text-foreground font-medium text-lg">Upload Resume or LinkedIn PDF</span>
-                          <span className="text-foreground opacity-50 text-sm mt-1">PDF format supported</span>
-                        </>
-                      )}
-                    </label>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
+        </div>
 
           <div className="flex justify-center pb-4">
             <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={canContinue ? { scale: 1.05 } : {}}
+              whileTap={canContinue ? { scale: 0.95 } : {}}
               onClick={handleContinue}
               disabled={!canContinue}
               className={`px-10 py-4 rounded-xl font-bold text-lg flex items-center gap-2 shadow-xl transition-all ${canContinue
-                ? "bg-gradient-to-r from-orange-400 to-orange-600 text-primary-foreground hover:shadow-orange-500/25"
-                : "bg-foreground/10 text-foreground/40 cursor-not-allowed"
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/25"
+                : "bg-foreground/10 text-foreground/40 cursor-not-allowed opacity-50"
                 }`}
             >
               Analyze Profile <ArrowRight className="w-5 h-5" />

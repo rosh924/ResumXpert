@@ -3,6 +3,10 @@ import RecruiterHome from './app/components/RecruiterHome';
 import RecruiterDashboard from './app/components/RecruiterDashboard';
 import './App.css';
 
+import Header from './app/components/Header';
+import Footer from './app/components/Footer';
+import { DashboardProvider } from './app/context/DashboardContext';
+
 function App() {
   const navigate = useNavigate();
 
@@ -17,10 +21,18 @@ function App() {
   };
 
   return (
-    <Routes>
-      <Route path="/" element={<RecruiterHome onStart={handleStartAnalysis} />} />
-      <Route path="/dashboard" element={<RecruiterDashboard />} />
-    </Routes>
+    <DashboardProvider>
+      <div className="flex flex-col min-h-screen">
+        <Header />
+        <main className="flex-grow pt-20">
+          <Routes>
+            <Route path="/" element={<RecruiterHome onStart={handleStartAnalysis} />} />
+            <Route path="/dashboard" element={<RecruiterDashboard />} />
+          </Routes>
+        </main>
+        <Footer />
+      </div>
+    </DashboardProvider>
   );
 }
 

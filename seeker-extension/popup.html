@@ -12,7 +12,7 @@
             justify-content: center;
             align-items: center;
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            background-color: #FFFDF1;
+            background-color: #f8fafc;
             overflow: hidden;
             position: relative;
         }
@@ -25,47 +25,43 @@
         }
 
         button#analyze {
-            background: #FF9644;
-            /* Solid primary orange */
+            background: #f97316;
             border: none;
             border-radius: 6px;
-            /* Simpler radius */
             padding: 10px 20px;
-            color: #FFFDF1;
+            color: white;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
             outline: none;
             width: 100%;
-            text-transform: none;
-            /* Removed uppercase */
+            box-shadow: 0 4px 6px -1px rgba(249, 115, 22, 0.2);
         }
 
         button#analyze:hover {
-            background: #e5873d;
-            /* Darker orange on hover */
+            background: #ea580c;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
         }
 
         button#analyze:active {
-            background: #cc7836;
+            transform: translateY(0);
         }
 
         .title {
-            color: #562F00;
+            color: #0f172a;
             font-size: 15px;
-            font-weight: 700;
-            letter-spacing: 1px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
             margin-bottom: 4px;
-            text-transform: uppercase;
         }
 
         .description {
-            color: #562F00;
-            opacity: 0.8;
+            color: #64748b;
             font-size: 11px;
             margin-bottom: 12px;
-            font-weight: 400;
+            font-weight: 500;
         }
     </style>
 </head>

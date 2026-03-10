@@ -12,11 +12,16 @@ import {
   Crown,
   MapPin,
   Search,
-  ChevronDown
+  ChevronDown,
+  Plus,
+  Pencil,
+  Trash2,
+  X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { useDashboard } from "../context/DashboardContext";
 
 export default function RecruiterDashboard() {
   const navigate = useNavigate();
@@ -32,6 +37,19 @@ export default function RecruiterDashboard() {
   const [candidateCart, setCandidateCart] = useState<any[]>([]);
   const [availableRoles, setAvailableRoles] = useState<string[]>([]);
   const [hasSubmittedCart, setHasSubmittedCart] = useState(false);
+
+  // CRUD State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingCandidate, setEditingCandidate] = useState<any>(null);
+  const [newCandidate, setNewCandidate] = useState({
+    name: "",
+    headline: "",
+    location: "",
+    skills: "",
+    linkedin_url: "",
+    picture: ""
+  });
 
   // Run once on mount to load the cart and available roles
   useEffect(() => {
@@ -52,36 +70,154 @@ export default function RecruiterDashboard() {
     fetchRoles();
   }, []);
 
-  // Run whenever jobRole changes to evaluate candidates (if initial) and fetch rankings
-  useEffect(() => {
-    async function analyzeCandidates() {
-      setLoading(true);
-      try {
-        // Only send the cart payload if this is the first analysis and we are on the initially requested role
-        const candidatesToSend = (!hasSubmittedCart && jobRole === initialJobRole) ? candidateProfiles : [];
+  const analyzeCandidates = async () => {
+    setLoading(true);
+    try {
+      // Only send the cart payload if this is the first analysis and we are on the initially requested role
+      const candidatesToSend = (!hasSubmittedCart && jobRole === initialJobRole) ? candidateProfiles : [];
 
-        const response = await fetch("http://127.0.0.1:5000/analyze-recruiter", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            candidates: candidatesToSend,
-            job_role: jobRole,
-            job_description: jobDescription, // Send context if this is the first analysis
-          }),
+      const response = await fetch("http://127.0.0.1:5000/analyze-recruiter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidates: candidatesToSend,
+          job_role: jobRole,
+          job_description: jobDescription, // Send context if this is the first analysis
+        }),
+      });
+
+      const data = await response.json();
+      setCandidates(data.ranked_candidates || []);
+      setHasSubmittedCart(true);
+
+      // Clear the candidates from location state so they aren't re-sent on browser refresh
+      if (!hasSubmittedCart && jobRole === initialJobRole && candidateProfiles.length > 0) {
+        navigate(location.pathname, { 
+          replace: true, 
+          state: { 
+            ...location.state, 
+            candidates: [] // Clear candidates after initial submission
+          } 
         });
-
-        const data = await response.json();
-        setCandidates(data.ranked_candidates);
-        setHasSubmittedCart(true);
-      } catch (err) {
-        console.error("Recruiter analysis error:", err);
-      } finally {
-        setLoading(false);
       }
+    } catch (err) {
+      console.error("Recruiter analysis error:", err);
+    } finally {
+      setLoading(false);
     }
+  };
 
+  const { setActions } = useDashboard();
+
+  // Teleport actions to header
+  useEffect(() => {
+    setActions(
+      <>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest hidden lg:inline">Role:</span>
+          <div className="relative group">
+            <select
+              className="appearance-none bg-primary/5 hover:bg-primary/20 text-primary font-bold text-sm py-1.5 pl-3 pr-8 rounded border border-primary/20 transition-all cursor-pointer"
+              value={jobRole}
+              onChange={(e) => setJobRole(e.target.value)}
+            >
+              {!availableRoles.includes(jobRole) && <option value={jobRole}>{jobRole}</option>}
+              {availableRoles.map(role => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-primary absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none transition-transform" />
+          </div>
+        </div>
+        
+        <div className="h-6 w-px bg-slate-200 mx-1 hidden sm:block"></div>
+
+        <Button
+          onClick={() => setIsAddModalOpen(true)}
+          variant="outline"
+          size="sm"
+          className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 font-bold"
+        >
+          <Plus className="w-4 h-4 mr-2" /> Add
+        </Button>
+        <Button
+          onClick={handleDownloadReport}
+          size="sm"
+          className="bg-primary hover:bg-primary/90 text-white font-bold"
+        >
+          <Download className="w-4 h-4 mr-2" /> Export
+        </Button>
+      </>
+    );
+    return () => setActions(null);
+  }, [jobRole, availableRoles, candidates, setActions]); // Added candidates to fix stale closure
+
+  // Run whenever jobRole changes
+  useEffect(() => {
     analyzeCandidates();
   }, [jobRole]);
+
+  const handleAddCandidate = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:5000/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...newCandidate,
+          skills: newCandidate.skills.split(",").map(s => s.trim()).filter(Boolean),
+          job_role: jobRole
+        }),
+      });
+      if (response.ok) {
+        setIsAddModalOpen(false);
+        setNewCandidate({ name: "", headline: "", location: "", skills: "", linkedin_url: "", picture: "" });
+        // Refresh directly
+        analyzeCandidates();
+      }
+    } catch (err) {
+      console.error("Failed to add candidate:", err);
+    }
+  };
+
+  const handleUpdateCandidate = async () => {
+    if (!editingCandidate) return;
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/candidates/${editingCandidate.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...editingCandidate,
+          skills: typeof editingCandidate.skills === 'string' 
+            ? editingCandidate.skills.split(",").map((s: string) => s.trim()).filter(Boolean) 
+            : editingCandidate.skills
+        }),
+      });
+      if (response.ok) {
+        setIsEditModalOpen(false);
+        setEditingCandidate(null);
+        // Refresh directly
+        analyzeCandidates();
+      }
+    } catch (err) {
+      console.error("Failed to update candidate:", err);
+    }
+  };
+
+  const handleDeleteCandidate = async (id: number) => {
+    if (!id) return;
+    if (!window.confirm("Are you sure you want to delete this candidate?")) return;
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/candidates/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        // Refresh directly
+        analyzeCandidates();
+      }
+    } catch (err) {
+      console.error("Failed to delete candidate:", err);
+    }
+  };
 
   const topCandidates = candidates.slice(0, 5);
   const averageScore =
@@ -119,7 +255,7 @@ export default function RecruiterDashboard() {
       const addFooter = (doc: jsPDF, pageNum: number) => {
         const str = `Page ${pageNum}`;
         doc.setFontSize(10);
-        doc.setTextColor(150);
+        doc.setTextColor(148, 163, 184); // Slate 400
         doc.text("ResumXpert \xA9 " + new Date().getFullYear(), margin, pageHeight - 10);
         doc.text(str, pageWidth - margin - doc.getTextWidth(str), pageHeight - 10);
       };
@@ -132,22 +268,23 @@ export default function RecruiterDashboard() {
       };
 
       // Header
-      pdf.setFontSize(24);
+      pdf.setFontSize(26);
       pdf.setFont("helvetica", "bold");
-      pdf.setTextColor(30, 58, 138);
+      pdf.setTextColor(30, 64, 175); // Dark Blue (RGB)
       pdf.text("ResumXpert Recruiter Report", margin, currentY + 5);
       currentY += 15;
 
       pdf.setFontSize(12);
       pdf.setFont("helvetica", "normal");
-      pdf.setTextColor(100);
+      pdf.setTextColor(100, 116, 139); // Slate 500
       pdf.text(`Target Role: ${jobRole.replace(/[^\x20-\x7E]/g, '')}`, margin, currentY);
       pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin - 50, currentY);
       currentY += 10;
 
-      pdf.setDrawColor(200);
+      pdf.setDrawColor(30, 64, 175); // Dark Blue line
+      pdf.setLineWidth(0.8);
       pdf.line(margin, currentY, pageWidth - margin, currentY);
-      currentY += 10;
+      currentY += 12;
 
       // Detailed Candidates Analysis
       for (let i = 0; i < topCandidates.length; i++) {
@@ -169,7 +306,7 @@ export default function RecruiterDashboard() {
           try {
             const imgData = await loadImageData(candidate.picture);
             pdf.addImage(imgData, 'PNG', margin, currentY, picSize, picSize);
-            pdf.setDrawColor(200);
+            pdf.setDrawColor(226, 232, 240); // Slate border
             pdf.rect(margin, currentY, picSize, picSize); // border
             textStartX = margin + picSize + 10;
             afterPicY = currentY + picSize + 5;
@@ -196,9 +333,9 @@ export default function RecruiterDashboard() {
         pdf.setTextColor(0);
         const fitTextY = currentY + 14 + (headLocationLines.length * 5);
         pdf.text(`Overall Fit: `, textStartX, fitTextY);
-        pdf.setTextColor(isFit ? 34 : 220, isFit ? 197 : 38, isFit ? 94 : 38);
+        pdf.setTextColor(isFit ? 34 : 220, isFit ? 197 : 38, isFit ? 94 : 38); // Green (#22c55e) / Red (#dc2626)
         pdf.text(isFit ? "YES (Strong Match)" : "NO (Needs Improvement)", textStartX + 25, fitTextY);
-        pdf.setTextColor(0);
+        pdf.setTextColor(0, 0, 0);
 
         currentY = Math.max(fitTextY + 10, afterPicY);
 
@@ -244,7 +381,7 @@ export default function RecruiterDashboard() {
         pdf.setFillColor(34, 197, 94);
         const maxBarWidth = pageWidth - margin * 2 - 50; 
         const matchedWidth = maxBarWidth * (matchedPct / 100);
-        if(matchedWidth > 0) pdf.rect(margin + 40, currentY - 3, matchedWidth, 4, "F");
+        if(matchedWidth > 0) pdf.rect(margin + 48, currentY - 3.5, matchedWidth, 4, "F");
         currentY += 8;
         
         // Draw Missing Skills Bar
@@ -252,7 +389,7 @@ export default function RecruiterDashboard() {
         pdf.text(`Missing Skills (${missingArr.length})`, margin, currentY);
         pdf.setFillColor(239, 68, 68);
         const missingWidth = maxBarWidth * (missingPct / 100);
-        if(missingWidth > 0) pdf.rect(margin + 40, currentY - 3, missingWidth, 4, "F");
+        if(missingWidth > 0) pdf.rect(margin + 48, currentY - 3.5, missingWidth, 4, "F");
         currentY += 10;
         
         pdf.setTextColor(0);
@@ -291,7 +428,7 @@ export default function RecruiterDashboard() {
       pdf.text("Database Matches", margin, currentY);
       currentY += 8;
 
-      pdf.setFillColor(245, 245, 245);
+      pdf.setFillColor(248, 250, 252); // Slate background
       pdf.rect(margin, currentY, pageWidth - margin * 2, 8, "F");
       pdf.setFontSize(10);
       pdf.setFont("helvetica", "bold");
@@ -340,10 +477,10 @@ export default function RecruiterDashboard() {
       const pageCount = pdf.internal.pages.length - 1; 
       for (let i = 1; i <= pageCount; i++) {
         pdf.setPage(i);
-        pdf.setDrawColor(30, 58, 138); // Primary Blue Border
+        pdf.setDrawColor(30, 64, 175); // Blue 800
         pdf.setLineWidth(1);
         // Draw page margin border (x, y, w, h)
-        pdf.rect(10, 10, pageWidth - 20, pageHeight - 20);
+        pdf.rect(10, 10, pageWidth - 20, pageHeight - 20, "S");
         addFooter(pdf, i);
       }
 
@@ -358,7 +495,7 @@ export default function RecruiterDashboard() {
     switch (index) {
       case 0: return "bg-gradient-to-b from-yellow-500/20 to-amber-600/10 border-yellow-500/50 text-yellow-100 shadow-[0_0_20px_rgba(234,179,8,0.2)]";
       case 1: return "bg-gradient-to-b from-slate-400/20 to-slate-500/10 border-slate-400/50 text-slate-100 shadow-[0_0_20px_rgba(148,163,184,0.1)] scale-95";
-      case 2: return "bg-gradient-to-b from-orange-400/20 to-orange-500/10 border-orange-400/50 text-orange-100 shadow-[0_0_20px_rgba(251,146,60,0.15)] scale-95";
+      case 2: return "bg-gradient-to-b from-blue-400/20 to-primary/10 border-primary/50 text-blue-100 shadow-[0_0_20px_rgba(59,130,246,0.15)] scale-95";
       default: return "bg-white/5 border-white/10 text-slate-300 scale-90 opacity-80";
     }
   };
@@ -382,47 +519,12 @@ export default function RecruiterDashboard() {
       {/* Dynamic Background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-primary/10 rounded-full blur-[120px]"></div>
-        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-orange-400/10 rounded-full blur-[100px]"></div>
+        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-blue-500/10 rounded-full blur-[100px]"></div>
       </div>
 
       <div ref={reportRef} className="relative z-10 max-w-7xl mx-auto px-6 py-8 space-y-8">
-
-        {/* Header */}
-        <header className="flex justify-between items-center mb-8 glass-panel p-6 rounded-2xl">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="rounded-full hover:bg-foreground/10 text-foreground">
-              <ArrowLeft className="w-6 h-6" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground mb-1">Recruiter Dashboard</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="flex items-center gap-2 text-sm text-primary">
-                  <Search className="w-4 h-4" />
-                  <span>Filter by Target Role: </span>
-                </div>
-                <div className="relative">
-                  <select
-                    className="appearance-none bg-primary/10 hover:bg-primary/20 text-foreground font-semibold text-sm py-1.5 pl-4 pr-10 rounded-full border border-primary/30 ring-offset-background focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer shadow-inner"
-                    value={jobRole}
-                    onChange={(e) => setJobRole(e.target.value)}
-                  >
-                    {!availableRoles.includes(jobRole) && <option value={jobRole} className="bg-background text-foreground">{jobRole}</option>}
-                    {availableRoles.map(role => (
-                      <option key={role} value={role} className="bg-background text-foreground">{role}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-primary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-              </div>
-            </div>
-          </div>
-          <Button
-            onClick={handleDownloadReport}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/25 border-0"
-          >
-            <Download className="w-4 h-4 mr-2" /> Download Report
-          </Button>
-        </header>
+        
+        {/* Recruiter Toolbar - REMOVED (now in header) */}
 
         {/* Cart Management */}
         {candidateCart.length > 0 && (
@@ -533,7 +635,8 @@ export default function RecruiterDashboard() {
                   <th className="px-6 py-4">Candidate</th>
                   <th className="px-6 py-4">Location</th>
                   <th className="px-6 py-4">Key Skills</th>
-                  <th className="px-6 py-4 text-right">Match</th>
+                  <th className="px-6 py-4">Match</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-primary/5">
@@ -561,10 +664,33 @@ export default function RecruiterDashboard() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4">
                       <span className={`font-bold text-lg ${c.ats_score > 70 ? 'text-emerald-500' : c.ats_score > 50 ? 'text-yellow-500' : 'text-foreground opacity-60'}`}>
                         {Math.round(c.ats_score)}%
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-primary hover:bg-primary/10"
+                          onClick={() => {
+                            setEditingCandidate({ ...c, skills: c.skills.join(", ") });
+                            setIsEditModalOpen(true);
+                          }}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:bg-red-500/10"
+                          onClick={() => handleDeleteCandidate(c.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -572,6 +698,49 @@ export default function RecruiterDashboard() {
             </table>
           </div>
         </div>
+
+        {/* Modals */}
+        {isAddModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-background border border-primary/20 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+              <button onClick={() => setIsAddModalOpen(false)} className="absolute top-4 right-4 text-foreground/50 hover:text-foreground">
+                <X className="w-6 h-6" />
+              </button>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-foreground">
+                <Plus className="text-emerald-500" /> Add New Candidate
+              </h2>
+              <div className="space-y-4">
+                <input placeholder="Name" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={newCandidate.name} onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} />
+                <input placeholder="Headline" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={newCandidate.headline} onChange={e => setNewCandidate({...newCandidate, headline: e.target.value})} />
+                <input placeholder="Location" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={newCandidate.location} onChange={e => setNewCandidate({...newCandidate, location: e.target.value})} />
+                <input placeholder="Skills (comma separated)" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={newCandidate.skills} onChange={e => setNewCandidate({...newCandidate, skills: e.target.value})} />
+                <input placeholder="LinkedIn URL" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={newCandidate.linkedin_url} onChange={e => setNewCandidate({...newCandidate, linkedin_url: e.target.value})} />
+                <Button onClick={handleAddCandidate} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white">Save Candidate</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isEditModalOpen && editingCandidate && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-background border border-primary/20 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+              <button onClick={() => setIsEditModalOpen(false)} className="absolute top-4 right-4 text-foreground/50 hover:text-foreground">
+                <X className="w-6 h-6" />
+              </button>
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-foreground">
+                <Pencil className="text-primary" /> Edit Candidate
+              </h2>
+              <div className="space-y-4">
+                <input placeholder="Name" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={editingCandidate.name} onChange={e => setEditingCandidate({...editingCandidate, name: e.target.value})} />
+                <input placeholder="Headline" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={editingCandidate.headline} onChange={e => setEditingCandidate({...editingCandidate, headline: e.target.value})} />
+                <input placeholder="Location" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={editingCandidate.location} onChange={e => setEditingCandidate({...editingCandidate, location: e.target.value})} />
+                <input placeholder="Skills (comma separated)" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={editingCandidate.skills} onChange={e => setEditingCandidate({...editingCandidate, skills: e.target.value})} />
+                <input placeholder="LinkedIn URL" className="w-full bg-primary/5 border border-primary/20 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground" value={editingCandidate.linkedin_url} onChange={e => setEditingCandidate({...editingCandidate, linkedin_url: e.target.value})} />
+                <Button onClick={handleUpdateCandidate} className="w-full bg-primary text-white">Update Candidate</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
 
       </div>
     </div>
