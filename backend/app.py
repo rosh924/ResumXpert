@@ -155,51 +155,72 @@ def extract_candidate_details_with_groq(text):
             "skills": []
         }
 
-def extract_meaningful_skills(text, top_n=10):
+def extract_skills_with_groq(text):
     """
-    Extracts 1-3 word phrases (n-grams) from text to identify skills,
-    avoiding single-word splitting of terms like "Machine Learning".
+    Uses Groq to extract a clean list of technical and soft skills from a text block.
+    This replaces the noisy N-gram approach.
+    """
+    prompt = f"""
+    Extract a clean list of technical and soft skills from the following text. 
+    Only return a JSON list of strings representing the skills.
+    Text: {text[:2000]}
+    
+    Expected Format:
+    ["Skill 1", "Skill 2", "Skill 3"]
     """
     try:
-        # Use CountVectorizer to find frequent n-grams (1-3 words)
-        # stop_words='english' removes common filler words
-        vectorizer = CountVectorizer(ngram_range=(1, 3), stop_words='english')
-        X = vectorizer.fit_transform([text])
-        feature_names = vectorizer.get_feature_names_out()
-        return set(feature_names)
-    except ValueError:
-        # Handle empty text or no tokens found
-        return set()
+        chat_completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model=GROQ_MODEL,
+            temperature=0.1,
+            response_format={"type": "json_object"} if "llama-3.1" in GROQ_MODEL or "llama-3.3" in GROQ_MODEL else None
+        )
+        content = chat_completion.choices[0].message.content
+        # Ensure we get a list
+        data = json.loads(content)
+        if isinstance(data, dict):
+            # If it wrapped it in a key, find the list
+            for v in data.values():
+                if isinstance(v, list): return v
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"Skill Extraction Error: {e}")
+        return []
 
-def calculate_ats_score(resume_text, job_description, input_skills):
+
+def calculate_ats_score(resume_text, job_description, input_skills, jd_skills=None):
     """
     Computes ATS score using Cosine Similarity.
-    Identifies missing skills using N-Gram extraction.
+    Identified missing skills using Groq-extracted precision skills.
     """
-    # 1. Embeddings for Score
-    # Combine resume text with explicit skills for better context
-    augmented_resume = f"{resume_text} {' '.join(input_skills)}"
+    sorted_skills = sorted([str(s).strip() for s in input_skills if s.strip()])
+    clean_resume = " ".join(resume_text.split())
+    clean_jd = " ".join(job_description.split())
     
-    embeddings = local_model.encode([augmented_resume, job_description])
-    score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0] * 100
+    augmented_resume = f"{clean_resume} {' '.join(sorted_skills)}".strip()
     
-    # 2. Advanced Skill Extraction (N-Grams)
-    # Extract phrases from JD
-    jd_phrases = extract_meaningful_skills(job_description)
-    resume_phrases = extract_meaningful_skills(augmented_resume)
+    if len(clean_jd) < 20:
+        return 0.0, [], []
+
+    try:
+        embeddings = local_model.encode([augmented_resume, clean_jd])
+        raw_score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0] * 100
+        score = max(0, min(100, raw_score))
+    except Exception as e:
+        score = 0.0
     
-    # Find phrases in JD that are NOT in Resume
-    missing_phrases = jd_phrases - resume_phrases
-    matched_phrases = jd_phrases.intersection(resume_phrases)
+    # Use provided jd_skills or extract them
+    if jd_skills is None:
+        jd_skills = set(extract_skills_with_groq(job_description))
+    else:
+        jd_skills = set(jd_skills)
+        
+    resume_skills = set(extract_skills_with_groq(augmented_resume))
     
-    # Filter logic: Prefer longer phrases if they are subsets of each other?
-    # For simplicity, we just take the top distinct ones.
-    # We remove very short or generic words if needed, but 'english' stop_words handles most.
+    missing = list(jd_skills - resume_skills)
+    matched = list(jd_skills.intersection(resume_skills))
     
-    sorted_missing = sorted(list(missing_phrases), key=len, reverse=True)[:10]
-    sorted_matched = sorted(list(matched_phrases), key=len, reverse=True)[:10]
-    
-    return round(float(score), 2), sorted_missing, sorted_matched
+    return round(float(score), 2), sorted(missing)[:12], sorted(matched)[:12]
 
 def analyze_gap_with_groq(resume_text, job_description, job_role):
     """
@@ -453,16 +474,24 @@ def analyze_recruiter():
             unique_candidates.append(cand)
     
     # Process new candidates
+    BAD_NAMES_EXACT = ["you might like", "(1) skills", "skills (1)", "career professional", "candidate", "unknown", "linkedin"]
+    
+    # Prerender JD skills for optimization
+    jd_skills = extract_skills_with_groq(job_description)
+    
     for cand in unique_candidates:
         name = cand.get("name", "Unknown")
-        # Add an aggressive normalization for deduplication
         normalized_name = name.lower().strip()
         
+        # Skip garbage candidates - use exact or more careful matching
+        if normalized_name in BAD_NAMES_EXACT or len(normalized_name) < 3:
+            continue
+            
         skills = cand.get("skills", [])
         headline = cand.get("headline", "")
         location = cand.get("location", "Unknown")
         picture = cand.get("picture", "")
-        linkedin_url = cand.get("linkedin_url", "")
+        linkedin_url = cand.get("linkedin_url", "").strip()
         
         # Combined text for embedding
         profile_text = f"{headline} \n {', '.join(skills)}"
@@ -472,19 +501,36 @@ def analyze_recruiter():
         
         summary = f"{name} is an applicant for {job_role} with key skills in {', '.join(matched_skills[:3]) if matched_skills else 'their respective field'}."
         
-        # Check if candidate already exists in DB for this role using normalized matching
-        c.execute("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = ? AND job_role = ?", (normalized_name, job_role))
-        existing = c.fetchone()
+        # Identity Mapping Logic
+        existing_id = None
         
-        if existing:
-            # Update their existing record
+        if linkedin_url and "linkedin.com" in linkedin_url.lower():
+             # 1. Try matching by URL first
+             c.execute("SELECT id FROM candidates WHERE linkedin_url = ? AND job_role = ?", (linkedin_url, job_role))
+             res = c.fetchone()
+             if res:
+                 existing_id = res['id']
+             else:
+                 # 2. If URL doesn't match, check if there's a same-name candidate WITHOUT a URL
+                 c.execute("SELECT id, linkedin_url FROM candidates WHERE LOWER(TRIM(name)) = ? AND job_role = ?", (normalized_name, job_role))
+                 res = c.fetchone()
+                 if res and (not res['linkedin_url'] or res['linkedin_url'] == ""):
+                     # Assume it's the same person who didn't have a URL before
+                     existing_id = res['id']
+        else:
+             # 3. No URL provided, match by name only
+             c.execute("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = ? AND job_role = ?", (normalized_name, job_role))
+             res = c.fetchone()
+             if res:
+                 existing_id = res['id']
+        
+        if existing_id:
             c.execute('''
                 UPDATE candidates 
-                SET headline = ?, location = ?, skills = ?, ats_score = ?, picture = ?, summary = ?, missing_skills = ?, matched_skills = ?, linkedin_url = ?
+                SET name = ?, headline = ?, location = ?, skills = ?, ats_score = ?, picture = ?, summary = ?, missing_skills = ?, matched_skills = ?, linkedin_url = ?
                 WHERE id = ?
-            ''', (headline, location, json.dumps(skills), ats_score, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url, existing['id']))
+            ''', (name, headline, location, json.dumps(skills), ats_score, picture, summary, json.dumps(missing_skills), json.dumps(matched_skills), linkedin_url, existing_id))
         else:
-            # Insert a new record
             c.execute('''
                 INSERT INTO candidates (name, headline, location, skills, ats_score, job_role, picture, summary, missing_skills, matched_skills, linkedin_url)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -494,7 +540,7 @@ def analyze_recruiter():
     
     # Fetch ALL candidates for this role 
     c.execute('''
-        SELECT name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url
+        SELECT id, name, headline, location, skills, ats_score, picture, summary, missing_skills, matched_skills, linkedin_url
         FROM candidates 
         WHERE job_role = ?
         ORDER BY ats_score DESC
@@ -517,16 +563,25 @@ def analyze_recruiter():
             
         seen_final_names.add(normalized)
         
+        def safe_json_load(val):
+            if not val: return []
+            if not isinstance(val, str): return val
+            try:
+                return json.loads(val)
+            except:
+                return []
+
         ranked_candidates.append({
+            "id": r_dict.get("id"),
             "name": r_dict.get("name", ""),
             "headline": r_dict.get("headline", ""),
             "location": r_dict.get("location", ""),
-            "skills": json.loads(r_dict.get("skills", "[]")) if isinstance(r_dict.get("skills"), str) else r_dict.get("skills", []),
+            "skills": safe_json_load(r_dict.get("skills")),
             "ats_score": r_dict.get("ats_score", 0),
             "picture": r_dict.get("picture", ""),
             "summary": r_dict.get("summary", ""),
-            "missing_skills": json.loads(r_dict.get("missing_skills", "[]")) if isinstance(r_dict.get("missing_skills"), str) else r_dict.get("missing_skills", []) or [],
-            "matched_skills": json.loads(r_dict.get("matched_skills", "[]")) if isinstance(r_dict.get("matched_skills"), str) else r_dict.get("matched_skills", []) or [],
+            "missing_skills": safe_json_load(r_dict.get("missing_skills")),
+            "matched_skills": safe_json_load(r_dict.get("matched_skills")),
             "linkedin_url": r_dict.get("linkedin_url", "")
         })
     
@@ -534,6 +589,98 @@ def analyze_recruiter():
         "ranked_candidates": ranked_candidates,
         "top_5": ranked_candidates[:5]
     })
+
+@app.route("/candidates", methods=["POST"])
+def add_candidate():
+    data = request.json
+    name = data.get("name", "Unknown")
+    headline = data.get("headline", "")
+    location = data.get("location", "Unknown")
+    skills = data.get("skills", [])
+    job_role = data.get("job_role", "")
+    picture = data.get("picture", "")
+    linkedin_url = data.get("linkedin_url", "")
+    
+    # For manual entry, we start with 0 score. 
+    # The recruiter can trigger a re-analysis by clicking 'Analyze' if they want.
+    ats_score = 0.0
+    summary = f"{name} is a manual entry for {job_role}."
+
+    conn = sqlite3.connect(DATABASE_URL)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO candidates (name, headline, location, skills, ats_score, job_role, picture, summary, linkedin_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (name, headline, location, json.dumps(skills), ats_score, job_role, picture, summary, linkedin_url))
+    conn.commit()
+    new_id = c.lastrowid
+    conn.close()
+    
+    return jsonify({"message": "Candidate added successfully", "id": new_id}), 201
+
+@app.route("/candidates/<int:id>", methods=["PUT"])
+def update_candidate(id):
+    data = request.json
+    conn = sqlite3.connect(DATABASE_URL)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("SELECT * FROM candidates WHERE id = ?", (id,))
+    candidate = c.fetchone()
+    if not candidate:
+        conn.close()
+        return jsonify({"error": "Candidate not found"}), 404
+    
+    name = data.get("name", candidate["name"])
+    headline = data.get("headline", candidate["headline"])
+    location = data.get("location", candidate["location"])
+    skills = data.get("skills", json.loads(candidate["skills"]) if candidate["skills"] else [])
+    picture = data.get("picture", candidate["picture"])
+    linkedin_url = data.get("linkedin_url", candidate["linkedin_url"])
+    
+    c.execute('''
+        UPDATE candidates 
+        SET name = ?, headline = ?, location = ?, skills = ?, picture = ?, linkedin_url = ?
+        WHERE id = ?
+    ''', (name, headline, location, json.dumps(skills), picture, linkedin_url, id))
+    
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Candidate updated successfully"})
+
+@app.route("/candidates", methods=["GET"])
+def get_candidates():
+    conn = sqlite3.connect(DATABASE_URL)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM candidates ORDER BY timestamp DESC")
+    rows = c.fetchall()
+    conn.close()
+    
+    candidates = []
+    for r in rows:
+        r_dict = dict(r)
+        candidates.append({
+            "id": r_dict.get("id"),
+            "name": r_dict.get("name"),
+            "headline": r_dict.get("headline"),
+            "location": r_dict.get("location"),
+            "skills": json.loads(r_dict.get("skills")) if r_dict.get("skills") else [],
+            "ats_score": r_dict.get("ats_score"),
+            "job_role": r_dict.get("job_role"),
+            "picture": r_dict.get("picture"),
+            "linkedin_url": r_dict.get("linkedin_url")
+        })
+    return jsonify(candidates)
+
+@app.route("/candidates/<int:id>", methods=["DELETE"])
+def delete_candidate(id):
+    conn = sqlite3.connect(DATABASE_URL)
+    c = conn.cursor()
+    c.execute("DELETE FROM candidates WHERE id = ?", (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Candidate deleted successfully"})
 
 import base64
 

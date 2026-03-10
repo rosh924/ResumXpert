@@ -24,6 +24,7 @@ import {
 import { useState, useEffect } from "react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { useDashboard } from "../context/DashboardContext";
 
 // Helper for Circular Progress with Gradient
 const CircularProgress = ({ value, size = 120, strokeWidth = 10 }: { value: number; size?: number; strokeWidth?: number }) => {
@@ -59,8 +60,8 @@ const CircularProgress = ({ value, size = 120, strokeWidth = 10 }: { value: numb
         />
         <defs>
           <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#FFCE99" />
-            <stop offset="100%" stopColor="#FF9644" />
+            <stop offset="0%" stopColor="#FB923C" />
+            <stop offset="100%" stopColor="#F97316" />
           </linearGradient>
         </defs>
       </svg>
@@ -89,30 +90,18 @@ export default function SeekerDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [proxyImage, setProxyImage] = useState<string | null>(null);
 
-  const jobRole = (location.state as any)?.jobRole || "";
+  const jobRole = (location.state as any)?.jobRole || "Career Professional";
   const jobDescription = (location.state as any)?.jobDescription || "";
-  const resumeFile = (location.state as any)?.resumeFile; // File object
   const extensionData = (location.state as any)?.extensionData; // JSON from extension
+  const resumeFile = (location.state as any)?.resumeFile; // File object from manual upload
 
   useEffect(() => {
     async function fetchAnalysis() {
       try {
         let response;
 
-        if (resumeFile) {
-          // Case 1: PDF Upload -> Send FormData
-          const formData = new FormData();
-          formData.append("resume", resumeFile);
-          formData.append("job_role", jobRole);
-          formData.append("job_description", jobDescription);
-
-          response = await fetch("http://127.0.0.1:5000/analyze-seeker", {
-            method: "POST",
-            body: formData, // No Content-Type header, let browser set boundary
-          });
-
-        } else if (extensionData) {
-          // Case 2: Extension Data -> Send JSON
+        if (extensionData) {
+          // Case 1: Extension Data -> Send JSON
           response = await fetch("http://127.0.0.1:5000/analyze-seeker", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -120,17 +109,27 @@ export default function SeekerDashboard() {
               mode: "extension",
               job_role: jobRole,
               job_description: jobDescription,
-              extension_data: extensionData
+              extensionData: extensionData // Match backend's camelCase expectation if needed
             }),
           });
+        } else if (resumeFile) {
+          // Case 2: Manual Upload -> Send FormData
+          const formData = new FormData();
+          formData.append("resume", resumeFile);
+          formData.append("job_role", jobRole);
+          formData.append("job_description", jobDescription);
+
+          response = await fetch("http://127.0.0.1:5000/analyze-seeker", {
+            method: "POST",
+            body: formData,
+          });
         } else {
-          // Case 3: Fallback / Error (Should be blocked by ModeSelection)
-          throw new Error("No resume or profile data provided.");
+          throw new Error("No profile data provided. Please upload a resume or use the extension.");
         }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Server responded with ${response.status}: ${errorText}`);
+        if (!response || !response.ok) {
+          const errorText = response ? await response.text() : "No response from server";
+          throw new Error(`Server responded with ${response?.status || 500}: ${errorText}`);
         }
 
         const data = await response.json();
@@ -164,22 +163,41 @@ export default function SeekerDashboard() {
     }
   }, [location.state]);
 
+  const { setActions } = useDashboard();
+
+  useEffect(() => {
+    setActions(
+      <>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest hidden lg:inline">Target:</span>
+          <span className="text-sm font-bold text-primary truncate max-w-[150px]">{jobRole}</span>
+        </div>
+
+        <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
+
+        <Button onClick={handleDownloadReport} size="sm" className="bg-primary hover:bg-primary/90 text-white font-bold">
+          <Download className="w-4 h-4 mr-2" />
+          Download PDF
+        </Button>
+      </>
+    );
+    return () => setActions(null);
+  }, [jobRole, setActions]);
+  const printRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
-  const printRef = useRef<HTMLDivElement>(null); // New ref for the hidden printable version
 
   const handleDownloadReport = async () => {
     if (!printRef.current) return;
 
     try {
-      // Temporarily reveal the print container just for the screenshot
-      printRef.current.style.display = 'block';
+      // Temporarily reveal the print container for capture
+      printRef.current.style.visibility = 'visible';
+      printRef.current.style.position = 'relative';
+      printRef.current.style.left = '0';
 
-      // Hide images to avoid canvas poisoning as before
+      // We NO LONGER hide images here. 
+      // We use a Base64 proxyImage which avoids canvas poisoning.
       const images = Array.from(printRef.current.querySelectorAll('img'));
-      const originalDisplays = images.map(img => img.style.display);
-      images.forEach(img => {
-        img.style.display = 'none';
-      });
 
       const canvas = await html2canvas(printRef.current, {
         scale: 2,
@@ -190,13 +208,12 @@ export default function SeekerDashboard() {
         windowWidth: 794, // Standard A4 pixel width at 96 DPI
       });
 
-      // Restore images
-      images.forEach((img, i) => {
-        img.style.display = originalDisplays[i];
-      });
+      // Restore images (No longer needed since we didn't hide them)
 
       // Hide the print container again
-      printRef.current.style.display = 'none';
+      printRef.current.style.visibility = 'hidden';
+      printRef.current.style.position = 'absolute';
+      printRef.current.style.left = '-9999px';
 
       const imgData = canvas.toDataURL("image/jpeg", 0.98);
 
@@ -211,7 +228,11 @@ export default function SeekerDashboard() {
     } catch (err: any) {
       console.error("PDF generation failed:", err);
       // Ensure we re-hide it if it crashes
-      if (printRef.current) printRef.current.style.display = 'none';
+      if (printRef.current) {
+        printRef.current.style.visibility = 'hidden';
+        printRef.current.style.position = 'absolute';
+        printRef.current.style.left = '-9999px';
+      }
       alert(`Failed to generate PDF report. Error: ${err.message || err}\n\nStack: ${err.stack || ''}`);
     }
   };
@@ -220,13 +241,13 @@ export default function SeekerDashboard() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background text-foreground relative overflow-hidden">
         {/* Background glow for loading state */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-500/20 rounded-full blur-[100px] pointer-events-none"></div>
 
         <div className="relative z-10">
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-            className="w-24 h-24 border-4 border-primary/30 border-t-primary rounded-full shadow-[0_0_20px_rgba(255,150,68,0.3)]"
+            className="w-24 h-24 border-4 border-primary/30 border-t-primary rounded-full shadow-[0_0_20px_rgba(249,115,22,0.3)]"
           />
           <div className="absolute inset-0 flex items-center justify-center">
             <Sparkles className="w-10 h-10 text-primary animate-pulse" />
@@ -245,7 +266,7 @@ export default function SeekerDashboard() {
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4">
         <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="glass-panel text-center space-y-4 p-8 rounded-3xl max-w-lg border border-red-500/20">
           <div className="bg-red-500/20 p-4 rounded-full inline-block mb-2">
-            <AlertCircle className="w-12 h-12 text-red-500" />
+            <AlertCircle className="w-12 h-12 text-orange-200" />
           </div>
           <h2 className="text-2xl text-foreground font-bold">Analysis Failed</h2>
           <p className="text-foreground opacity-70">{error}</p>
@@ -394,25 +415,7 @@ export default function SeekerDashboard() {
 
       <div ref={reportRef} className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
 
-        {/* Navbar / Header */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-4 rounded-2xl sticky top-4 z-50">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="rounded-full hover:bg-foreground/10 text-foreground">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-orange-400">ResumXpert</span>
-                <span className="text-foreground opacity-50 font-light text-sm">|</span>
-                <span className="text-foreground opacity-70 font-medium text-sm tracking-wide">AI Career Coach</span>
-              </h1>
-            </div>
-          </div>
-          <Button onClick={handleDownloadReport} className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_15px_rgba(255,150,68,0.3)] border-0 transition-all hover:scale-105">
-            <Download className="w-4 h-4 mr-2" />
-            Download Report
-          </Button>
-        </header>
+        {/* Dashboard Toolbar - REMOVED (now in header) */}
 
         {/* Hero Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -520,7 +523,7 @@ export default function SeekerDashboard() {
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.2 + (i * 0.05) }}
                       >
-                        <Badge className="bg-gradient-to-r from-orange-500/10 to-red-500/10 text-orange-200 border-orange-500/20 hover:bg-orange-500/20 px-3 py-1.5 text-sm transition-all hover:scale-105 cursor-default">
+                        <Badge className="bg-gradient-to-r from-orange-500/10 to-orange-500/10 text-orange-200 border-orange-500/20 hover:bg-orange-500/20 px-3 py-1.5 text-sm transition-all hover:scale-105 cursor-default">
                           + {skill}
                         </Badge>
                       </motion.div>
@@ -574,7 +577,7 @@ export default function SeekerDashboard() {
                     viewport={{ once: true }}
                     className="group"
                   >
-                    <div className="bg-background/80 backdrop-blur-sm border border-primary/20 p-6 rounded-2xl hover:border-primary/40 transition-all duration-300 h-full flex flex-col hover:bg-background hover:shadow-[0_0_20px_rgba(255,150,68,0.15)] relative overflow-hidden">
+                    <div className="bg-background/80 backdrop-blur-sm border border-primary/20 p-6 rounded-2xl hover:border-primary/40 transition-all duration-300 h-full flex flex-col hover:bg-background hover:shadow-[0_0_20px_rgba(128,0,0,0.15)] relative overflow-hidden">
                       <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-primary/5 to-transparent rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
 
                       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-background to-orange-100 border border-primary/20 flex items-center justify-center text-foreground font-bold text-xl mb-6 shadow-lg group-hover:scale-110 transition-transform duration-300 group-hover:border-primary/50">
@@ -610,7 +613,7 @@ export default function SeekerDashboard() {
             viewport={{ once: true }}
           >
             <div className="flex items-center gap-3 mb-6 px-2">
-              <div className="bg-orange-500/20 p-2.5 rounded-xl border border-orange-500/20">
+              <div className="bg-primary/20 p-2.5 rounded-xl border border-primary/20">
                 <LayoutDashboard className="w-6 h-6 text-primary" />
               </div>
               <h2 className="text-xl font-bold text-foreground">Recommended Courses</h2>
@@ -625,7 +628,7 @@ export default function SeekerDashboard() {
                   rel="noopener noreferrer"
                   className="block group"
                 >
-                  <div className="glass-card rounded-2xl p-5 flex items-start justify-between gap-5 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(255,150,68,0.15)]">
+                  <div className="glass-card rounded-2xl p-5 flex items-start justify-between gap-5 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(128,0,0,0.15)]">
                     <div>
                       <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-1 text-lg">{course.title}</h4>
                       <div className="flex items-center gap-3 mt-3">
@@ -666,7 +669,7 @@ export default function SeekerDashboard() {
                   rel="noopener noreferrer"
                   className="block group"
                 >
-                  <div className="glass-card rounded-2xl p-5 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(255,150,68,0.15)]">
+                  <div className="glass-card rounded-2xl p-5 group-hover:border-primary/50 group-hover:shadow-[0_0_15px_rgba(128,0,0,0.15)]">
                     <div className="flex justify-between items-start mb-2">
                       <h4 className="font-bold text-foreground group-hover:text-primary transition-colors text-lg">{proj.name}</h4>
                       <Badge className="bg-background text-foreground border border-primary/20 text-xs px-2.5 py-0.5">★ {proj.stars}</Badge>
