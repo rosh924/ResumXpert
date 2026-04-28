@@ -39,7 +39,7 @@ Backend Setup
 Clone the repository:
 
 Bash
-git clone https://github.com/your-username/ResumeXpert.git
+git clone https://github.com/rosh924/ResumeXpert.git
 cd ResumeXpert/backend
 Create a virtual environment and install dependencies:
 
